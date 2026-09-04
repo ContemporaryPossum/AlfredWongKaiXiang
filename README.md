@@ -6,10 +6,9 @@ Plain HTML, CSS and JavaScript. No framework, no build step, and no sub-folders:
 
 ```
 index.html                       the whole site (one page)
-thanks.html                      shown after the contact form is sent
 styles.css                       all styling, design tokens at the top in :root
-main.js                          menu, scroll reveals, work preview stage, small motion
-netlify.toml                     optional Netlify settings (cache and security headers)
+main.js                          menu, scroll reveals, work preview stage, contact form, small motion
+netlify.toml                     optional, only used if you host on Netlify (cache and security headers)
 robots.txt
 alfred-hero.webp                 hero portrait (1200 px, transparent soft edges)
 alfred-hero-sm.webp              hero portrait for phones (780 px)
@@ -21,19 +20,26 @@ geist-latin.woff2                body font (SIL Open Font License)
 *-desktop.webp / *-mobile.webp   screenshots of the seven client sites
 ```
 
-## Deploy on Netlify
+## Deploy on Cloudflare Pages
 
-1. Create a new GitHub repository, choose "uploading an existing file", and drag all the files in this folder into the drop zone. Commit.
-2. In Netlify: Add new site > Import an existing project > pick the repository.
-3. Build command: leave empty. Publish directory: leave as the root (`.`).
-4. Deploy. Netlify gives you a `something.netlify.app` address; attach your own domain under Domain settings if you have one.
+1. Cloudflare dashboard > Workers & Pages > Create > Pages > Connect to Git.
+2. If it says "Missing Git connection", click Connect GitHub (or Add account) and authorise the Cloudflare GitHub app. Give it access to this repository (or all repositories). If the app is already installed but the repo is not listed, go to GitHub > Settings > Applications > Installed GitHub Apps > Cloudflare > Configure > Repository access, add the repository, save, then refresh Cloudflare.
+3. Select the repository. Framework preset: None. Build command: leave empty. Build output directory: leave empty (or `/`).
+4. Save and Deploy. You get a `project-name.pages.dev` address; add your own domain under Custom domains.
 
-Every later push to GitHub redeploys the site automatically.
+## Deploy on Netlify (alternative)
+
+Add new site > Import an existing project > pick the repository. Build command empty, publish directory `.`. Deploy.
+
+Either way, every later push to GitHub redeploys the site automatically.
+
+## Contact form
+
+The form works on any host with no backend. Pressing Send opens WhatsApp with the visitor's details pre-filled as a message to +60 10-507 2222. If your number ever changes, update it in three places in `index.html`: the WhatsApp button (`wa.me/...`), the form's `action`, and its `data-whatsapp` attribute.
 
 ## Things to update once the site is live
 
-- **Your domain.** Search `index.html` for `alfredwong.netlify.app` and replace it with your real address (canonical link, Open Graph and Twitter tags, JSON-LD). These need absolute URLs.
-- **Contact form.** Uses Netlify Forms, so it only works on the live Netlify site, not when opened as a local file. Submissions appear in Netlify under Site > Forms. Turn on email notifications there so enquiries reach `Alfredwkxuk@gmail.com`.
+- **Your domain.** Search `index.html` for `alfredwong.netlify.app` and replace it with your real address, for example `alfredwongkaixiang.pages.dev` (canonical link, Open Graph and Twitter tags, JSON-LD). These need absolute URLs.
 - **Testimonials.** The section is in `index.html` with a `hidden` attribute and two draft quotes. Send the wording to Michael Gan (Selangor Welding & Racking) and K&W World Engineering for their approval, edit the text to whatever they agree with, then delete `hidden` from `<section class="quotes" ... hidden>` to show it.
 
 ## Editing content

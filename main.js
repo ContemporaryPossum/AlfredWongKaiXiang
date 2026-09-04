@@ -202,12 +202,30 @@
   /* ---------- footer year ---------- */
   $$("[data-year]").forEach((el) => { el.textContent = new Date().getFullYear(); });
 
-  /* ---------- form: friendly note when opened as a local file ---------- */
-  const form = $("form[data-netlify]");
-  if (form && location.protocol === "file:") {
+  /* ---------- contact form: compose a WhatsApp message from the fields ---------- */
+  const form = $("[data-contact-form]");
+  if (form) {
     form.addEventListener("submit", (e) => {
+      if (!form.checkValidity()) return; // let the browser show its validation messages
       e.preventDefault();
-      alert("The form only works once the site is live on Netlify. Use the WhatsApp button for now.");
+      const v = (name) => (form.elements[name] && form.elements[name].value.trim()) || "";
+      const lines = [
+        "Hi Alfred, I would like to talk about a project.",
+        "",
+        "Name: " + v("name"),
+        v("business") ? "Business: " + v("business") : null,
+        "WhatsApp: " + v("phone"),
+        "Need: " + v("need"),
+        "",
+        "About the business:",
+        v("text")
+      ].filter((l) => l !== null).join("\n");
+      const number = form.dataset.whatsapp || "60105072222";
+      const url = "https://wa.me/" + number + "?text=" + encodeURIComponent(lines);
+      const win = window.open(url, "_blank", "noopener");
+      if (!win) location.href = url; // popup blocked: navigate instead
+      const btn = form.querySelector('[type="submit"]');
+      if (btn) { btn.textContent = "Opening WhatsApp"; setTimeout(() => { btn.textContent = "Send enquiry"; }, 4000); }
     });
   }
 })();

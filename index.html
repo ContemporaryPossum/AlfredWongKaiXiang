@@ -409,10 +409,12 @@
           </dl>
         </div>
 
-        <!-- Netlify Forms: works automatically once the site is deployed on Netlify. Submissions appear under Site > Forms. -->
-        <form class="form reveal" style="--d: .1s" name="contact" method="POST" action="/thanks.html" data-netlify="true" netlify-honeypot="bot-field">
-          <input type="hidden" name="form-name" value="contact">
-          <p class="form__honeypot"><label>Leave this field empty <input name="bot-field" tabindex="-1" autocomplete="off"></label></p>
+        <!--
+          Contact form: works on any host (Cloudflare Pages, Netlify, Vercel) with no backend.
+          Pressing Send opens WhatsApp with the details pre-filled as a message to +60 10-507 2222.
+          The number lives in data-whatsapp below and in the WhatsApp button above; change both if it changes.
+        -->
+        <form class="form reveal" style="--d: .1s" name="contact" method="get" action="https://wa.me/60105072222" target="_blank" data-whatsapp="60105072222" data-contact-form>
           <div class="form__row">
             <div class="field">
               <label for="f-name">Your name</label>
@@ -441,10 +443,10 @@
           </div>
           <div class="field">
             <label for="f-message">A few lines about your business</label>
-            <textarea id="f-message" name="message" rows="4" required></textarea>
+            <textarea id="f-message" name="text" rows="4" required></textarea>
           </div>
           <button class="btn btn--primary" type="submit">Send enquiry</button>
-          <p class="form__note">I read every message myself and reply personally.</p>
+          <p class="form__note">Pressing send opens WhatsApp with your details filled in. Nothing is stored on this website, and I reply personally.</p>
         </form>
       </div>
     </section>
