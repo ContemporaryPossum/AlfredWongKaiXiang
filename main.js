@@ -10,6 +10,115 @@
   const finePointer = window.matchMedia("(hover: hover) and (pointer: fine)").matches;
   const $ = (sel, ctx) => (ctx || document).querySelector(sel);
   const $$ = (sel, ctx) => Array.from((ctx || document).querySelectorAll(sel));
+  const body = document.body;
+
+  /* ---------- intro: the site speaks to the visitor before the hero appears ---------- */
+  const intro = $("[data-intro]");
+  let introDone = false;
+  const finishIntro = () => {
+    if (introDone) return;
+    introDone = true;
+    try { sessionStorage.setItem("introSeen", "1"); } catch (_) { /* private mode */ }
+    body.classList.remove("intro-active");
+    body.classList.add("intro-done");
+    if (intro) {
+      intro.classList.add("is-leaving");
+      setTimeout(() => intro.classList.add("is-hidden"), 1200);
+    }
+    document.dispatchEvent(new CustomEvent("intro:done"));
+  };
+
+  let introSeen = false;
+  try { introSeen = sessionStorage.getItem("introSeen") === "1"; } catch (_) { /* ignore */ }
+  const forceIntro = /[?&]intro\b/.test(location.search);
+
+  if (!intro || reduceMotion || (introSeen && !forceIntro)) {
+    if (intro) intro.classList.add("is-hidden");
+    introDone = true;
+    body.classList.add("intro-done");
+    setTimeout(() => document.dispatchEvent(new CustomEvent("intro:done")), 50);
+  } else {
+    body.classList.add("intro-active");
+    const lineEl = $("[data-intro-line]", intro);
+    const coarse = window.matchMedia("(pointer: coarse)").matches;
+    const width = window.innerWidth;
+    const device = coarse ? (width < 820 ? "a phone" : "a tablet") : "a computer";
+    let time = "";
+    try { time = new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }).toLowerCase(); } catch (_) { /* ignore */ }
+    let city = "";
+    try {
+      const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || "";
+      city = tz.includes("/") ? tz.split("/").pop().replace(/_/g, " ") : "";
+    } catch (_) { /* ignore */ }
+    const when = time ? ", at " + time + (city ? " " + city + " time" : "") : "";
+    const lines = [
+      "Hello. Yes, you.",
+      "You are on " + device + ", " + width + " pixels wide" + when + ".",
+      "Your customers find businesses the same way, in seconds.",
+      "So here is what I do with those seconds."
+    ];
+
+    let li = 0, ci = 0, timer = 0;
+    const type = () => {
+      const line = lines[li];
+      if (ci <= line.length) {
+        lineEl.textContent = line.slice(0, ci);
+        ci += 1;
+        timer = setTimeout(type, 13 + Math.random() * 14);
+        return;
+      }
+      if (li === lines.length - 1) { timer = setTimeout(finishIntro, 800); return; }
+      timer = setTimeout(() => {
+        li += 1; ci = 0; lineEl.textContent = "";
+        timer = setTimeout(type, 180);
+      }, 620);
+    };
+    timer = setTimeout(type, 350);
+
+    const skip = () => { clearTimeout(timer); finishIntro(); };
+    intro.addEventListener("click", skip);
+    document.addEventListener("keydown", (e) => {
+      if (!introDone && (e.key === "Escape" || e.key === "Enter" || e.key === " ")) skip();
+    });
+    setTimeout(skip, 11000); // never hold a visitor hostage
+  }
+
+  /* ---------- the "screen" behind the portrait shows the visitor's own address ---------- */
+  $$("[data-visitor-host]").forEach((el) => { el.textContent = location.host || "this screen"; });
+
+  /* ---------- speech bubble: small asides that react to the visitor ---------- */
+  const bubble = $("[data-bubble]");
+  if (bubble) {
+    const said = new Set();
+    let hideTimer = 0;
+    const heroInView = () => window.scrollY < window.innerHeight * 0.6;
+    const say = (key, text, ms) => {
+      if (said.has(key) || !heroInView()) return;
+      said.add(key);
+      bubble.textContent = text;
+      bubble.classList.add("is-on");
+      clearTimeout(hideTimer);
+      hideTimer = setTimeout(() => bubble.classList.remove("is-on"), ms || 6500);
+    };
+    document.addEventListener("intro:done", () => {
+      setTimeout(() => say("hello", "Hello, I am Alfred. Take your time."), 1500);
+      setTimeout(() => say("linger", "Still here? Most visitors decide in five seconds. Thank you for a few more."), 16000);
+    });
+    if (finePointer) {
+      document.addEventListener("mouseout", (e) => {
+        if (!e.relatedTarget && e.clientY <= 0) say("exit", "Leaving already? My WhatsApp is one tap away.");
+      });
+    }
+    const baseTitle = document.title;
+    document.addEventListener("visibilitychange", () => {
+      if (document.hidden) {
+        document.title = "Still here when you are | Alfred Wong";
+      } else {
+        document.title = baseTitle;
+        say("back", "Welcome back. I kept your place.");
+      }
+    });
+  }
 
   /* ---------- nav: scrolled state via sentinel, mobile menu ---------- */
   const nav = $("[data-nav]");

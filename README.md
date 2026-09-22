@@ -37,6 +37,16 @@ Either way, every later push to GitHub redeploys the site automatically.
 
 The form works on any host with no backend. Pressing Send opens WhatsApp with the visitor's details pre-filled as a message to +60 10-507 2222. If your number ever changes, update it in three places in `index.html`: the WhatsApp button (`wa.me/...`), the form's `action`, and its `data-whatsapp` attribute.
 
+## The "fourth wall" intro
+
+The site speaks to the visitor before the hero appears, using only what the browser already knows (device type, screen width, local time). It plays once per visit, can be skipped with a tap, click, Esc, Enter or space, and is skipped entirely for visitors who prefer reduced motion. Add `?intro` to the address to watch it again, for example `https://your-site.pages.dev/?intro`.
+
+- Lines: edit the `lines` array in `main.js` (search for `Hello. Yes, you.`).
+- Speech bubble asides: the `say(...)` calls in `main.js`. Each one shows once per visit.
+- Tab title while the visitor is on another tab: search `main.js` for `Still here when you are`.
+- The outlined "screen" behind your portrait shows the visitor's own address and the words `You are here` (in `index.html`, search `hero__screen`).
+- To remove the intro completely, delete the `<div class="intro" ...>` block in `index.html`; everything else keeps working.
+
 ## Things to update once the site is live
 
 - **Your domain.** Search `index.html` for `alfredwong.netlify.app` and replace it with your real address, for example `alfredwongkaixiang.pages.dev` (canonical link, Open Graph and Twitter tags, JSON-LD). These need absolute URLs.

@@ -30,6 +30,10 @@
   <link rel="preload" href="geist-latin.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="preload" href="alfred-hero.webp" as="image" type="image/webp" imagesrcset="alfred-hero-sm.webp 780w, alfred-hero.webp 1200w" imagesizes="(max-width: 960px) 82vw, 44vw">
   <link rel="stylesheet" href="styles.css">
+  <noscript><style>
+    .intro { display: none; }
+    .hero__title, .hero__sub, .hero__actions, .hero__portrait { opacity: 1; animation: none; }
+  </style></noscript>
 
   <script type="application/ld+json">
   {
@@ -56,6 +60,21 @@
 <body>
   <a class="skip" href="#main">Skip to content</a>
   <div class="nav-sentinel" data-nav-sentinel aria-hidden="true"></div>
+
+  <!--
+    INTRO: the site addresses the visitor directly before the hero appears.
+    Lines are written in main.js from what the browser already knows (screen width, device type,
+    local time). Plays once per visit, can be skipped with a click or Esc, and is skipped entirely
+    for visitors who prefer reduced motion.
+  -->
+  <div class="intro" data-intro aria-hidden="true">
+    <div class="intro__plate intro__plate--top"></div>
+    <div class="intro__plate intro__plate--bottom"></div>
+    <div class="intro__text">
+      <p class="intro__line" data-intro-line></p>
+    </div>
+    <button class="intro__skip" type="button" data-intro-skip>Skip</button>
+  </div>
 
   <header class="nav" data-nav>
     <div class="wrap nav__inner">
@@ -102,6 +121,12 @@
           </div>
         </div>
         <div class="hero__portrait" data-parallax>
+          <div class="hero__screen" aria-hidden="true">
+            <div class="hero__screen-bar">
+              <span class="hero__screen-url" data-visitor-host>this screen</span>
+              <span class="hero__screen-tag">You are here</span>
+            </div>
+          </div>
           <img
             src="alfred-hero.webp"
             srcset="alfred-hero-sm.webp 780w, alfred-hero.webp 1200w"
@@ -109,6 +134,7 @@
             width="1200" height="1600"
             alt="Alfred Wong Kai Xiang, freelance website designer and social media marketer"
             fetchpriority="high" decoding="async">
+          <p class="hero__bubble" data-bubble role="status" aria-live="polite"></p>
         </div>
       </div>
     </section>
