@@ -17,7 +17,7 @@ og-image.jpg                     1200 x 630 link preview for WhatsApp, Facebook,
 favicon-32.png, favicon-512.png, apple-touch-icon.png
 bricolage-grotesque-latin.woff2  display font (SIL Open Font License)
 geist-latin.woff2                body font (SIL Open Font License)
-*-desktop.webp / *-mobile.webp   screenshots of the seven client sites
+*-desktop.webp / *-mobile.webp   screenshots of the eight client sites
 ```
 
 ## Deploy on Cloudflare Pages
@@ -44,8 +44,18 @@ The site speaks to the visitor before the hero appears, using only what the brow
 - Lines: edit the `lines` array in `main.js` (search for `Hello. Yes, you.`).
 - Speech bubble asides: the `say(...)` calls in `main.js`. Each one shows once per visit.
 - Tab title while the visitor is on another tab: search `main.js` for `Still here when you are`.
-- The outlined "screen" behind your portrait shows the visitor's own address and the words `You are here` (in `index.html`, search `hero__screen`).
+- The time in the intro is always shown as Kuala Lumpur time, whatever the visitor's own time zone.
 - To remove the intro completely, delete the `<div class="intro" ...>` block in `index.html`; everything else keeps working.
+
+## Motion and interaction
+
+All motion is plain CSS and JavaScript, no libraries. Springs use the CSS `linear()` easing curves defined in `:root` (`--spring-soft`, `--spring-pop`). Everything respects the visitor's reduced-motion setting.
+
+- Navigation condenses into a floating pill on scroll (desktop). A 2px orange progress line along the top of the page tracks how far down the visitor is (browsers that support scroll-driven animations).
+- Section headings rise word by word; blocks fade in from a slight blur as they enter the viewport.
+- Service tiles carry a cursor-following spotlight and lift on hover; the work preview tilts toward the cursor with a soft glare.
+- The "8" in the About section counts up when it comes into view. Edit `data-count` in `index.html` when the number changes.
+- Primary buttons have a light sweep on hover; the hero button is gently magnetic.
 
 ## Things to update once the site is live
 

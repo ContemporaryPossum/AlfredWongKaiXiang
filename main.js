@@ -43,14 +43,14 @@
     const coarse = window.matchMedia("(pointer: coarse)").matches;
     const width = window.innerWidth;
     const device = coarse ? (width < 820 ? "a phone" : "a tablet") : "a computer";
+    // Time is always shown as Kuala Lumpur time, wherever the visitor is.
     let time = "";
-    try { time = new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }).toLowerCase(); } catch (_) { /* ignore */ }
-    let city = "";
     try {
-      const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || "";
-      city = tz.includes("/") ? tz.split("/").pop().replace(/_/g, " ") : "";
-    } catch (_) { /* ignore */ }
-    const when = time ? ", at " + time + (city ? " " + city + " time" : "") : "";
+      time = new Date().toLocaleTimeString("en-MY", { hour: "numeric", minute: "2-digit", timeZone: "Asia/Kuala_Lumpur" }).toLowerCase();
+    } catch (_) {
+      try { time = new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }).toLowerCase(); } catch (__) { /* ignore */ }
+    }
+    const when = time ? ", at " + time + " Kuala Lumpur time" : "";
     const lines = [
       "Hello. Yes, you.",
       "You are on " + device + ", " + width + " pixels wide" + when + ".",
@@ -82,9 +82,6 @@
     });
     setTimeout(skip, 11000); // never hold a visitor hostage
   }
-
-  /* ---------- the "screen" behind the portrait shows the visitor's own address ---------- */
-  $$("[data-visitor-host]").forEach((el) => { el.textContent = location.host || "this screen"; });
 
   /* ---------- speech bubble: small asides that react to the visitor ---------- */
   const bubble = $("[data-bubble]");
@@ -149,7 +146,7 @@
   }
 
   /* ---------- hero: word-by-word reveal ---------- */
-  $$("[data-split]").forEach((el) => {
+  const splitWords = (el) => {
     const words = el.textContent.trim().split(/\s+/);
     el.setAttribute("aria-label", words.join(" "));
     el.textContent = "";
@@ -161,7 +158,9 @@
       span.setAttribute("aria-hidden", "true");
       el.appendChild(span);
     });
-  });
+  };
+  $$("[data-split]").forEach(splitWords);
+  if (!reduceMotion) $$("[data-words]").forEach(splitWords);
 
   /* ---------- hero: pointer-following glow + gentle portrait parallax ---------- */
   const hero = $(".hero");
@@ -204,16 +203,51 @@
   });
 
   /* ---------- scroll reveal ---------- */
-  const revealEls = $$(".reveal");
+  const revealEls = $$(".reveal, [data-words]");
   if ("IntersectionObserver" in window && !reduceMotion) {
     const io = new IntersectionObserver((entries) => {
       entries.forEach((en) => {
-        if (en.isIntersecting) { en.target.classList.add("is-in"); io.unobserve(en.target); }
+        if (en.isIntersecting) {
+          en.target.classList.add("is-in");
+          io.unobserve(en.target);
+          // the stagger delay is only for the entrance; drop it so hover reacts instantly afterwards
+          setTimeout(() => en.target.style.removeProperty("--d"), 1400);
+        }
       });
     }, { threshold: 0.15, rootMargin: "0px 0px -8% 0px" });
     revealEls.forEach((el) => io.observe(el));
   } else {
     revealEls.forEach((el) => el.classList.add("is-in"));
+  }
+
+  /* ---------- numbers count up once visible ---------- */
+  $$("[data-count]").forEach((el) => {
+    const target = parseFloat(el.dataset.count);
+    if (isNaN(target) || reduceMotion || !("IntersectionObserver" in window)) return;
+    const io = new IntersectionObserver((entries) => {
+      if (!entries.some((e) => e.isIntersecting)) return;
+      io.disconnect();
+      const start = performance.now(), dur = 1100;
+      const tick = (now) => {
+        const p = Math.min(1, (now - start) / dur);
+        const eased = 1 - Math.pow(1 - p, 3);
+        el.textContent = Math.round(target * eased);
+        if (p < 1) requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+    }, { threshold: 0.6 });
+    io.observe(el);
+  });
+
+  /* ---------- service tiles: cursor spotlight ---------- */
+  if (finePointer) {
+    $$(".bento .tile").forEach((tile) => {
+      tile.addEventListener("pointermove", (e) => {
+        const r = tile.getBoundingClientRect();
+        tile.style.setProperty("--sx", ((e.clientX - r.left) / r.width * 100).toFixed(1) + "%");
+        tile.style.setProperty("--sy", ((e.clientY - r.top) / r.height * 100).toFixed(1) + "%");
+      });
+    });
   }
 
   /* ---------- process timeline: draw the line once in view ---------- */
@@ -282,8 +316,8 @@
       p.addEventListener("focusin", () => show(i));
     });
 
-    // Touch or keyboard scroll: the row nearest the middle of the viewport becomes active
-    if ("IntersectionObserver" in window) {
+    // Touch devices (no hover): the row nearest the middle of the viewport becomes active
+    if ("IntersectionObserver" in window && !finePointer) {
       const io = new IntersectionObserver((entries) => {
         entries.forEach((en) => {
           if (en.isIntersecting) show(projects.indexOf(en.target));
@@ -300,7 +334,13 @@
         const r = frame.getBoundingClientRect();
         rx = ((e.clientX - r.left) / r.width - 0.5) * 6;   // rotateY
         ry = ((e.clientY - r.top) / r.height - 0.5) * -6;  // rotateX
-        if (!raf) raf = requestAnimationFrame(() => { raf = 0; frame.style.setProperty("--rx", rx.toFixed(2)); frame.style.setProperty("--ry", ry.toFixed(2)); });
+        const gx = ((e.clientX - r.left) / r.width * 100).toFixed(1) + "%";
+        const gy = ((e.clientY - r.top) / r.height * 100).toFixed(1) + "%";
+        if (!raf) raf = requestAnimationFrame(() => {
+          raf = 0;
+          frame.style.setProperty("--rx", rx.toFixed(2)); frame.style.setProperty("--ry", ry.toFixed(2));
+          frame.style.setProperty("--gx", gx); frame.style.setProperty("--gy", gy);
+        });
       });
       stage.addEventListener("pointerleave", () => { frame.style.setProperty("--rx", 0); frame.style.setProperty("--ry", 0); });
     }
