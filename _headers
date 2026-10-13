@@ -1,0 +1,26 @@
+# Cloudflare reads this file on every deploy. It is not served to visitors.
+# HTML, CSS and JS keep Cloudflare's default (always revalidated), so edits show up straight away.
+
+/*
+  X-Frame-Options: SAMEORIGIN
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+  Permissions-Policy: camera=(), microphone=(), geolocation=()
+
+# Fonts never change: cache for a year.
+/*.woff2
+  Cache-Control: public, max-age=31536000, immutable
+
+# Images: cache for a week. A replaced image that keeps the same filename can take
+# up to a week to update for returning visitors, so give replacements a new filename.
+/*.webp
+  Cache-Control: public, max-age=604800
+
+/*.jpg
+  Cache-Control: public, max-age=604800
+
+/*.png
+  Cache-Control: public, max-age=604800
+
+/*.mp4
+  Cache-Control: public, max-age=604800
