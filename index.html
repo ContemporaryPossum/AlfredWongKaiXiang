@@ -62,8 +62,14 @@
 <body>
   <a class="skip" href="#main">Skip to content</a>
   <div class="nav-sentinel" data-nav-sentinel aria-hidden="true"></div>
-  <div class="progress" aria-hidden="true"></div>
   <div class="cursor" data-cursor aria-hidden="true"><span class="cursor__label" data-cursor-label></span></div>
+  <!--
+    FIELD: a background drawn from an abstract video, turned into a field of tangerine dots.
+    The frames live in field-sprite.webp; main.js picks the frame from how far you have scrolled,
+    and the dots near the mouse (or a finger on phones) swell and move aside. Decorative only.
+    Its class is "dotfield" so it never clashes with the "field" class on the form boxes.
+  -->
+  <canvas class="dotfield" data-field aria-hidden="true"></canvas>
 
   <!--
     INTRO: the site addresses the visitor directly before the hero appears.
@@ -76,7 +82,6 @@
     <div class="intro__plate intro__plate--bottom"></div>
     <div class="intro__text">
       <p class="intro__line" data-intro-line></p>
-      <div class="intro__meter"><span data-intro-meter></span></div>
     </div>
     <button class="intro__skip" type="button" data-intro-skip>Skip</button>
   </div>
@@ -114,11 +119,6 @@
   <main id="main">
     <!-- HERO -->
     <section class="hero" id="top">
-      <div class="hero__aura" aria-hidden="true" data-hero-aura>
-        <span class="hero__blob hero__blob--a"></span>
-        <span class="hero__blob hero__blob--b"></span>
-        <span class="hero__grid"></span>
-      </div>
       <div class="wrap hero__layout">
         <div class="hero__copy">
           <p class="eyebrow hero__eyebrow" data-rise style="--r: 0">Alfred Wong Kai Xiang</p>
@@ -129,7 +129,7 @@
             <a class="btn btn--ghost btn--lg" href="#work">See the work</a>
           </div>
           <ul class="hero__facts" data-rise style="--r: 8">
-            <li><strong>9</strong> live websites</li>
+            <li><strong>20+</strong> websites built</li>
             <li>English, Malay and Mandarin</li>
             <li>I reply personally on WhatsApp</li>
           </ul>
@@ -151,7 +151,7 @@
             <img src="yakiniku-desktop.webp" width="1600" height="900" alt="" decoding="async">
           </div>
           <div class="float float--chip" aria-hidden="true" data-depth="1.6">
-            <span class="pulse"></span><span><strong>9 websites</strong> live right now</span>
+            <span class="pulse"></span><span><strong>20+ websites</strong> built</span>
           </div>
 
           <p class="hero__bubble" data-bubble role="status" aria-live="polite"></p>
@@ -192,14 +192,10 @@
 
       <div class="wrap stats">
         <div class="stat reveal">
-          <p class="stat__num"><span data-count="9">9</span></p>
-          <p class="stat__text">live websites, each one designed, written and built by me</p>
+          <p class="stat__num"><span data-count="20" data-suffix="+">20+</span></p>
+          <p class="stat__text">websites built for small businesses, each one designed, written and built by me</p>
         </div>
         <div class="stat reveal" style="--d: .08s">
-          <p class="stat__num"><span data-count="9">9</span></p>
-          <p class="stat__text">different kinds of business, from a welding workshop to a kids sports academy</p>
-        </div>
-        <div class="stat reveal" style="--d: .16s">
           <p class="stat__num"><span data-count="3">3</span></p>
           <p class="stat__text">languages for copy and captions: English, Malay and Mandarin</p>
         </div>
@@ -215,13 +211,15 @@
       <div class="wrap work__head">
         <header class="section-head reveal">
           <p class="eyebrow">Selected work</p>
-          <h2 data-words>Nine live websites, nine very different businesses.</h2>
-          <p class="section-head__sub">From a welding workshop in Klang to a sports academy in Kuala Lumpur and a yakiniku restaurant in Kuching. Each one designed, written and built by me. <span class="hint-fine">Rest on a preview to scroll through the page, and click to visit the live site.</span><span class="hint-touch">Swipe to browse, and tap to visit the live site.</span></p>
+          <h2 data-words>Nine of my 20+ websites, nine very different businesses.</h2>
+          <p class="section-head__sub">From a welding workshop in Klang to a sports academy in Kuala Lumpur and a yakiniku restaurant in Kuching. Each one designed, written and built by me. <span class="hint-fine">Rest on a preview to scroll through the page, and click to visit the live site.</span><span class="hint-touch">Swipe to browse. The card in the middle scrolls through its homepage, and a tap opens the live site.</span></p>
         </header>
         <div class="work__count" aria-hidden="true"><span data-reel-index>01</span> / <span>09</span></div>
       </div>
 
       <div class="reel" data-reel>
+        <!-- the stage holds the cards and the progress line; on computers it stays on screen while the cards slide -->
+        <div class="reel__stage">
         <div class="reel__viewport" data-reel-viewport>
           <ol class="reel__track" data-reel-track>
             <li class="card" style="--tone: #a6d13b" data-full="eps-full.webp">
@@ -354,6 +352,52 @@
           </ol>
         </div>
         <div class="wrap reel__rail" aria-hidden="true"><span data-reel-bar></span></div>
+        </div>
+      </div>
+    </section>
+
+    <!--
+      SPEED: real measurements of the nine example sites, drawn as an interactive bar chart.
+      The numbers live in main.js (search for SPEED) and in the table below, which is what
+      visitors without JavaScript and screen reader users get. Update both if you re-measure.
+    -->
+    <section class="speed" id="speed" aria-labelledby="speed-title">
+      <div class="wrap speed__grid">
+        <header class="section-head speed__head reveal">
+          <h2 id="speed-title" data-words>Fast on a real phone, not just on my laptop.</h2>
+          <p class="section-head__sub">I loaded each example site the way a customer on mobile data sees it: a phone-sized screen on a 4G connection, three times each. Hover or tap a bar for the numbers.</p>
+        </header>
+        <div class="chart reveal no-blur" data-chart>
+          <div class="chart__head">
+            <div class="chart__summary">
+              <p class="chart__big" data-chart-big></p>
+              <p class="chart__caption" data-chart-caption></p>
+            </div>
+            <div class="chart__toggle" role="group" aria-label="What to show" data-chart-toggle hidden>
+              <button type="button" data-metric="lcp" aria-pressed="true">Load time</button>
+              <button type="button" data-metric="kb" aria-pressed="false">Page weight</button>
+            </div>
+          </div>
+          <div class="chart__plot" data-chart-plot></div>
+          <div class="chart__data">
+          <table class="chart__table" data-chart-table>
+            <caption>Load time and page weight of the nine example sites, phone-sized screen on 4G</caption>
+            <thead><tr><th scope="col">Website</th><th scope="col">Main content visible</th><th scope="col">Page weight</th></tr></thead>
+            <tbody>
+              <tr><td>Selangor Welding &amp; Racking</td><td>0.7 s</td><td>0.9 MB</td></tr>
+              <tr><td>Angel Club Beauty &amp; Wellness</td><td>0.9 s</td><td>0.6 MB</td></tr>
+              <tr><td>The Mimie's Catering</td><td>1.0 s</td><td>1.0 MB</td></tr>
+              <tr><td>K&amp;W World Engineering</td><td>1.1 s</td><td>0.4 MB</td></tr>
+              <tr><td>Sunshine Tots</td><td>1.2 s</td><td>4.4 MB</td></tr>
+              <tr><td>Safiyya Pet Shop</td><td>1.3 s</td><td>1.2 MB</td></tr>
+              <tr><td>Yakiniku Ichiban</td><td>1.3 s</td><td>1.8 MB</td></tr>
+              <tr><td>H2 Fix</td><td>1.8 s</td><td>0.5 MB</td></tr>
+              <tr><td>EPS Sports Academy</td><td>3.0 s</td><td>5.1 MB</td></tr>
+            </tbody>
+          </table>
+          </div>
+          <p class="chart__note">Measured by me on 14 October 2026 in a test browser set up like a mid-range phone on mobile data: phone-sized screen, 9 Mbps download, 60 ms latency and a processor slowed to half speed. Each site was loaded three times with an empty cache and the middle result is shown. "Main content visible" is the moment the largest image or block of text appears. Your own speed will vary with your phone and signal.</p>
+        </div>
       </div>
     </section>
 
@@ -583,8 +627,8 @@
           <p>Most of my clients are not technical and do not want to be. They want a website that looks trustworthy, loads fast on a phone, and makes it easy for a customer to call or WhatsApp. That is what I build, and I explain everything in plain language along the way. Once it is live, I look after it, so you never need to log in anywhere.</p>
           <dl class="facts">
             <div>
-              <dt>Live websites</dt>
-              <dd data-count="9">9</dd>
+              <dt>Websites built</dt>
+              <dd data-count="20" data-suffix="+">20+</dd>
             </div>
             <div>
               <dt>Languages</dt>

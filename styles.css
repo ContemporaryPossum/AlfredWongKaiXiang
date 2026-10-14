@@ -230,20 +230,24 @@ h3 {
 
 /* ---------- nav ---------- */
 .nav-sentinel { position: absolute; top: 0; height: 40px; width: 1px; pointer-events: none; }
-.progress {
+/* ---------- background field (drawn by main.js) ---------- */
+.dotfield {
   position: fixed;
-  top: 0; left: 0;
-  width: 100%; height: 2px;
-  background: var(--accent);
-  transform-origin: 0 50%;
-  transform: scaleX(0);
-  z-index: 95;
+  inset: 0;
+  z-index: 0;
+  width: 100%;
+  height: 100%;
   pointer-events: none;
+  opacity: 0;
+  transition: opacity 1.6s var(--ease);
+  /* calmer in the middle of the screen where text sits */
+  -webkit-mask-image: radial-gradient(130% 95% at 50% 45%, rgba(0, 0, 0, .55), #000 85%);
+  mask-image: radial-gradient(130% 95% at 50% 45%, rgba(0, 0, 0, .55), #000 85%);
 }
-@supports (animation-timeline: scroll()) {
-  .progress { animation: progress-grow linear both; animation-timeline: scroll(root); }
-}
-@keyframes progress-grow { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+.dotfield.is-on { opacity: 1; }
+main, .footer { position: relative; z-index: 1; }
+html.lenis, html.lenis body { height: auto; }
+html.lenis { scroll-behavior: auto; }
 .nav {
   position: fixed;
   inset: 0 0 auto 0;
@@ -419,8 +423,6 @@ body.intro-active { overflow: hidden; }
   animation: caret 1s steps(2, jump-none) infinite;
 }
 @keyframes caret { 50% { opacity: 0; } }
-.intro__meter { width: min(320px, 60%); height: 2px; background: var(--line); border-radius: 2px; overflow: hidden; }
-.intro__meter span { display: block; height: 100%; background: var(--accent); transform-origin: left; transform: scaleX(0); transition: transform .4s var(--ease); }
 .intro__skip {
   position: absolute;
   right: var(--gutter); bottom: 2rem;
@@ -444,38 +446,8 @@ body.intro-active { overflow: hidden; }
   padding: calc(var(--nav-h) + 2rem) 0 5rem;
   overflow: clip;
   isolation: isolate;
-}
-.hero__aura { position: absolute; inset: 0; z-index: -1; pointer-events: none; }
-.hero__blob {
-  position: absolute;
-  border-radius: 50%;
-  filter: blur(70px);
-  translate: calc(var(--mx, 0) * 40px) calc(var(--my, 0) * 30px);
-  transition: translate 1.2s var(--ease);
-}
-.hero__blob--a {
-  width: 44rem; height: 44rem;
-  right: -12rem; top: -10rem;
-  background: radial-gradient(closest-side, rgba(255, 106, 61, .42), transparent);
-  animation: drift-a 18s ease-in-out infinite alternate;
-}
-.hero__blob--b {
-  width: 34rem; height: 34rem;
-  left: -14rem; bottom: -16rem;
-  background: radial-gradient(closest-side, rgba(217, 78, 38, .26), transparent);
-  animation: drift-b 22s ease-in-out infinite alternate;
-}
-@keyframes drift-a { to { transform: translate(-7rem, 5rem) scale(1.12); } }
-@keyframes drift-b { to { transform: translate(6rem, -4rem) scale(.92); } }
-.hero__grid {
-  position: absolute; inset: 0;
-  background-image:
-    linear-gradient(var(--line) 1px, transparent 1px),
-    linear-gradient(90deg, var(--line) 1px, transparent 1px);
-  background-size: 72px 72px;
-  -webkit-mask-image: radial-gradient(ellipse 60% 55% at 70% 45%, #000 15%, transparent 72%);
-  mask-image: radial-gradient(ellipse 60% 55% at 70% 45%, #000 15%, transparent 72%);
-  opacity: .55;
+  view-timeline: --hero block;
+  view-timeline-inset: 0px;
 }
 .hero__layout {
   display: grid;
@@ -483,6 +455,15 @@ body.intro-active { overflow: hidden; }
   align-items: center;
 }
 .hero__copy { position: relative; z-index: 2; }
+/* a soft dark backing so the dot field never fights the text */
+.hero__copy::before {
+  content: "";
+  position: absolute;
+  inset: -14% -16% -16% -12%;
+  z-index: -1;
+  background: radial-gradient(closest-side, rgba(13, 14, 17, .9), rgba(13, 14, 17, .7) 55%, rgba(13, 14, 17, 0));
+  pointer-events: none;
+}
 .hero__eyebrow { margin-bottom: 1.25rem; }
 .hero__title {
   font-size: clamp(2.3rem, 9vw, 3.3rem);
@@ -781,7 +762,7 @@ body.intro-active { overflow: hidden; }
 }
 .stat:first-child .stat__num { background-image: linear-gradient(180deg, #ffb497, var(--accent) 70%); }
 .stat__text { color: var(--ink-2); font-size: .95rem; margin-top: .9rem; max-width: 28ch; }
-@media (min-width: 900px) { .stats { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+@media (min-width: 900px) { .stats { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 
 /* ---------- sections ---------- */
 .yours, .services, .process, .about, .quotes, .contact { padding-block: var(--section); }
@@ -824,21 +805,31 @@ body.intro-active { overflow: hidden; }
 .reel__rail { position: relative; height: 2px; background: var(--line); border-radius: 2px; overflow: hidden; }
 .reel__rail span { position: absolute; inset: 0; background: var(--accent); transform-origin: left; transform: scaleX(var(--p, 0)); }
 
-/* pinned mode (desktop, set by main.js): vertical scrolling slides the cards sideways */
-.reel.is-pinned .reel__viewport {
+/* pinned mode (computers, set by main.js): vertical scrolling slides the cards sideways.
+   The stage, cards and progress line together, stays on screen for the whole slide. */
+.reel.is-pinned .reel__stage {
   position: sticky;
   top: 0;
   height: 100vh;
   height: 100svh;
+  display: flex;
+  flex-direction: column;
+  padding: calc(var(--nav-h) + 1rem) 0 5vh;
+}
+.reel.is-pinned .reel__viewport {
+  flex: 1 1 auto;
+  min-height: 0;
   overflow: hidden;
   overflow: clip;
   display: flex;
   align-items: center;
-  padding: calc(var(--nav-h) + 1rem) 0 2rem;
+  padding: 0;
   scroll-snap-type: none;
 }
+/* cards shrink on short screens so the progress line always fits underneath */
+.reel.is-pinned .card:not(.card--next) { width: min(84vw, 960px, (100vh - 250px) * 1.65); }
 .reel.is-pinned .reel__track { transform: translate3d(calc(var(--x, 0) * -1px), 0, 0); will-change: transform; }
-.reel.is-pinned .reel__rail { position: sticky; bottom: 4vh; z-index: 2; margin-top: -2px; }
+.reel.is-pinned .reel__rail { flex: none; margin-top: 1.25rem; }
 
 .card {
   position: relative;
@@ -961,7 +952,7 @@ body.intro-active { overflow: hidden; }
 .card__next-actions { display: flex; flex-wrap: wrap; gap: .75rem; }
 
 /* ---------- picture yours: live phone sketch ---------- */
-.yours { background: var(--bg-2); --c: #c53030; }
+.yours { background: rgba(19, 20, 26, .82); --c: #c53030; }
 .yours__grid { display: grid; gap: 2.5rem; }
 .yours__controls { display: grid; gap: 1.5rem; }
 /* phones: controls, then the sketch, then the button. Desktop: button sits under the controls. */
@@ -1455,7 +1446,7 @@ body.intro-active { overflow: hidden; }
 }
 
 /* ---------- process: steps light up as the line fills ---------- */
-.process { background: var(--bg-2); }
+.process { background: rgba(19, 20, 26, .82); }
 .process__grid { display: grid; gap: 1rem; }
 .process__head .btn { justify-self: start; margin-top: .5rem; }
 .steps { position: relative; display: grid; gap: 1rem; --p: 0; }
@@ -1710,6 +1701,78 @@ body.intro-active { overflow: hidden; }
   .footer__inner { grid-template-columns: 1fr auto auto; align-items: end; gap: 3rem; }
 }
 
+/* ---------- speed: interactive bar chart of real measurements ---------- */
+.speed { padding-block: var(--section); border-top: 1px solid var(--line); }
+.chart {
+  --chart-bar: var(--accent);
+  --chart-grid: rgba(242, 239, 233, .07);
+  --chart-label: var(--ink-3);
+  position: relative;
+  padding: clamp(1.25rem, 3vw, 2.25rem);
+  border-radius: var(--radius);
+  border: 1px solid var(--line);
+  background: rgba(19, 20, 26, .9);
+}
+.chart__head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 1.25rem 2rem; margin-bottom: 1.75rem; }
+.chart__big {
+  font-family: var(--font-display);
+  font-size: clamp(2.6rem, 5vw, 3.8rem);
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: -0.04em;
+  font-variant-numeric: tabular-nums;
+}
+.chart__caption { margin-top: .5rem; color: var(--ink-2); font-size: .95rem; max-width: 40ch; }
+.chart__toggle { display: inline-flex; gap: 3px; padding: 3px; border-radius: var(--pill); border: 1px solid var(--line-strong); }
+.chart__toggle button { padding: .5rem 1rem; border-radius: var(--pill); font-size: .88rem; font-weight: 600; color: var(--ink-2); transition: background-color .25s, color .25s; }
+.chart__toggle button:hover { color: var(--ink); }
+.chart__toggle button[aria-pressed="true"] { background: var(--ink); color: var(--bg); }
+.chart__plot { position: relative; }
+.chart__plot svg { display: block; width: 100%; height: auto; overflow: visible; }
+.chart__plot text { font-family: var(--font-body); }
+.chart__row { cursor: default; outline: none; }
+.chart__row .bar { fill: var(--chart-bar); transition: opacity .3s; }
+.chart__row .hit { fill: transparent; }
+.chart__row .name { fill: var(--ink-2); font-size: 13px; transition: fill .3s; }
+.chart__row .val { fill: var(--ink-2); font-size: 12.5px; font-variant-numeric: tabular-nums; transition: fill .3s; }
+.chart__plot.is-hovering .chart__row .bar { opacity: .32; }
+.chart__plot.is-hovering .chart__row.is-active .bar { opacity: 1; }
+.chart__row.is-active .name, .chart__row.is-active .val { fill: var(--ink); }
+.chart__row:focus-visible .name { fill: var(--ink); text-decoration: underline; }
+.chart__grid line { stroke: var(--chart-grid); stroke-width: 1; }
+.chart__grid text { fill: var(--chart-label); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+.chart__median line { stroke: var(--ink-3); stroke-width: 1; stroke-dasharray: 3 4; }
+.chart__median text { fill: var(--ink-2); font-size: 11.5px; }
+.chart__tip {
+  position: absolute; z-index: 3;
+  min-width: 190px;
+  padding: .7rem .85rem;
+  border-radius: 12px;
+  border: 1px solid var(--line-strong);
+  background: var(--bg-3);
+  box-shadow: 0 20px 40px -20px rgba(0, 0, 0, .9);
+  font-size: .85rem;
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(4px);
+  transition: opacity .18s, transform .25s var(--ease);
+}
+.chart__tip.is-on { opacity: 1; transform: none; }
+.chart__tip strong { display: block; margin-bottom: .35rem; font-weight: 600; color: var(--ink); }
+.chart__tip span { display: flex; justify-content: space-between; gap: 1rem; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.chart__tip span b { color: var(--ink); font-weight: 600; }
+.chart__note { margin-top: 1.5rem; color: var(--ink-3); font-size: .82rem; max-width: 80ch; }
+.chart__table { width: 100%; border-collapse: collapse; font-size: .9rem; color: var(--ink-2); }
+.chart__table caption { text-align: left; color: var(--ink-3); font-size: .85rem; padding-bottom: .75rem; }
+.chart__table th, .chart__table td { text-align: left; padding: .45rem .75rem .45rem 0; border-bottom: 1px solid var(--line); font-variant-numeric: tabular-nums; }
+.chart__table th { color: var(--ink); font-weight: 600; }
+/* once the chart is drawn, the table stays for screen readers only */
+.chart__data { overflow-x: auto; }
+.chart.is-live .chart__data {
+  position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; border: 0;
+  overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap;
+}
+
 /* ---------- scroll reveal ---------- */
 .reveal {
   opacity: 0;
@@ -1735,6 +1798,47 @@ body.intro-active { overflow: hidden; }
 }
 [data-words].is-in .w { opacity: 1; transform: none; filter: blur(0); }
 
+/* =========================================================
+   Scroll-linked effects. Each is tied directly to the scroll position,
+   so it plays forwards and backwards with the page. Browsers without
+   CSS scroll-driven animations, and reduced motion, show the final state.
+   ========================================================= */
+@supports (animation-timeline: view()) {
+  @media (prefers-reduced-motion: no-preference) {
+    /* hero: everything drifts up and eases back as you leave */
+    .hero__layout { animation: hero-out linear both; animation-timeline: --hero; animation-range: exit 0% exit 100%; }
+    @keyframes hero-out { to { transform: translateY(-10vh) scale(.96); opacity: .15; } }
+
+    /* proof: the big numbers rise into place */
+    .stat__num { animation: num-rise linear both; animation-timeline: view(block 0px); animation-range: entry 0% cover 40%; }
+    @keyframes num-rise { from { transform: translateY(60%); opacity: 0; } to { transform: none; opacity: 1; } }
+
+    /* services: the browser mockup scrolls its page, the phone and the Reel drift */
+    .tile--web { view-timeline: --webtile block; view-timeline-inset: 0px; }
+    .mini-browser img { animation: page-scroll linear both; animation-timeline: --webtile; animation-range: cover 10% cover 90%; }
+    @keyframes page-scroll { from { object-position: 50% 0%; } to { object-position: 50% 32%; } }
+    .mini-phone { animation: phone-drift linear both; animation-timeline: --webtile; animation-range: cover 0% cover 100%; }
+    @keyframes phone-drift { from { translate: 0 50px; } to { translate: 0 -40px; } }
+    .tile--social { view-timeline: --socialtile block; view-timeline-inset: 0px; }
+    .reelphone { animation: reel-tilt linear both; animation-timeline: --socialtile; animation-range: cover 0% cover 100%; }
+    @keyframes reel-tilt { from { transform: translateY(60px) rotate(-6deg); } to { transform: translateY(-30px) rotate(3deg); } }
+
+    /* picture yours: the phone tips up into place */
+    .yours__stage { view-timeline: --sketch block; view-timeline-inset: 0px; }
+    .mock { animation: tip-up linear both; animation-timeline: --sketch; animation-range: entry 0% cover 45%; }
+    @keyframes tip-up { from { transform: perspective(1100px) rotateX(22deg) translateY(80px) scale(.92); opacity: .4; } to { transform: none; opacity: 1; } }
+
+    /* about: the film slowly pulls back as it crosses the screen */
+    .about__film { view-timeline: --film block; view-timeline-inset: 0px; }
+    .about__film img, .about__film video { animation: film-pull linear both; animation-timeline: --film; animation-range: cover 0% cover 100%; }
+    @keyframes film-pull { from { transform: scale(1.18); } to { transform: scale(1); } }
+
+    /* contact: the heading slides in from the side as you arrive */
+    .contact__title { animation: title-slide linear both; animation-timeline: view(block 0px); animation-range: entry 0% cover 35%; }
+    @keyframes title-slide { from { transform: translateX(-6vw); } to { transform: none; } }
+  }
+}
+
 /* ---------- reduced motion ---------- */
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }
@@ -1752,7 +1856,6 @@ body.intro-active { overflow: hidden; }
   .hero__bubble { transition: none; }
   .intro__line::after { animation: none; }
   .hero__frame::after { animation: none; }
-  .hero__blob { animation: none; }
   .steps__item { opacity: 1; }
   .steps::after { transform: none; }
   /* still images instead of moving video */
