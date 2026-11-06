@@ -48,6 +48,17 @@
   window.addEventListener("scroll", requestScenes, { passive: true });
   // where an element starts on the page, ignoring any transform (so a scene's own movement never feeds back into it)
   const docTop = (node) => { let t = 0; while (node) { t += node.offsetTop; node = node.offsetParent; } return t; };
+  // loads a whole film into memory and plays it from there. Some hosts (Cloudflare Workers, which serves the live
+  // site, is one) send the whole file even when the browser asks for part of it; the browser then cannot jump to
+  // another point in the film, and Safari may not play it at all. A film already in memory can always jump. If
+  // fetching does not work (for example when index.html is opened straight from a folder), it loads the normal way.
+  const loadFilm = (video, url) => new Promise((done) => {
+    const direct = () => { video.src = url; done(); };
+    if (!window.fetch || !window.URL || !URL.createObjectURL || location.protocol === "file:") { direct(); return; }
+    fetch(url).then((r) => { if (!r.ok) throw new Error(r.status); return r.blob(); })
+      .then((b) => { video.src = URL.createObjectURL(b); done(); })
+      .catch(direct);
+  });
   // writes a style only when it changes
   const put = (node, prop, v) => { const k = "__" + prop; if (node[k] !== v) { node[k] = v; node.style[prop] = v; } };
   const remeasure = () => { measures.forEach((fn) => fn()); runScenes(true); };
@@ -214,14 +225,14 @@
   /* ---------- hero: the ink T-rex bites a chunk out of "excuses." ---------- */
   // Everything in this scene is worked out from how far you have scrolled through the hero (p, 0 to 1), so scrolling
   // back plays it in reverse. "excuses." stays in front of the T-rex while it rises and bites (styles.css gives it
-  // the higher z-index); "Good websites." stays behind it, and the solid mouth keeps it from showing through.
+  // the higher z-index); "Good websites." stays behind it and shows through the open mouth, which is see-through.
   // The bite removes the part of the word inside the jaws and leaves a scalloped tooth mark on what is left. The
   // bitten piece stays between the teeth while the head shakes (only the inside of the mouth shows it, so the teeth
   // overlap it) and is chewed away as the T-rex leaves. What is left of the word tumbles to the ground.
   // BITE says where the mouth is in each drawing, as fractions of the picture. Measure again if you replace them.
   const BITE = {
-    open: [0.30, 0.41],  // middle of the open mouth (rex-open-4.webp)
-    half: [0.28, 0.345], // middle of the half-open mouth (rex-half-4.webp)
+    open: [0.30, 0.41],  // middle of the open mouth (rex-open-5.webp)
+    half: [0.28, 0.345], // middle of the half-open mouth (rex-half-5.webp)
     bite: [0.22, 0.31],  // where the closed teeth meet (rex-bite.webp)
     span: [0.10, 0.36]   // front and back of the closed jaws
   };
@@ -610,7 +621,9 @@
       video.removeAttribute("controls");
       video.muted = true;
       ui.hidden = false;
-      let userPaused = false;
+      let userPaused = false, inView = false, film = null;
+      const src = (video.querySelector("source") || video).getAttribute("src");
+      const getFilm = () => { if (!film) film = loadFilm(video, src); return film; };
       const sync = () => {
         const playing = !video.paused && !video.ended;
         playBtn.textContent = playing ? "Pause" : "Play";
@@ -618,13 +631,17 @@
         soundBtn.textContent = video.muted ? "Sound off" : "Sound on";
         soundBtn.setAttribute("aria-pressed", String(!video.muted));
       };
-      const play = () => { video.preload = "auto"; const pr = video.play(); if (pr && pr.catch) pr.catch(sync); };
+      // asked: play once the film is in memory (by itself, only if the introduction is still in view by then)
+      const play = (asked) => getFilm().then(() => {
+        if (!asked && !inView) return;
+        const pr = video.play(); if (pr && pr.catch) pr.catch(sync);
+      });
       playBtn.addEventListener("click", () => {
-        if (video.paused) { userPaused = false; play(); } else { userPaused = true; video.pause(); }
+        if (video.paused) { userPaused = false; play(true); } else { userPaused = true; video.pause(); }
       });
       soundBtn.addEventListener("click", () => {
         video.muted = !video.muted;
-        if (!video.muted && video.paused) { userPaused = false; play(); }
+        if (!video.muted && video.paused) { userPaused = false; play(true); }
         sync();
       });
       ["play", "pause", "volumechange", "ended"].forEach((ev) => video.addEventListener(ev, sync));
@@ -641,11 +658,12 @@
         // a screen or so before it arrives: draw the film, and start downloading it so it is ready to play
         new IntersectionObserver((entries) => entries.forEach((en) => {
           reel.classList.toggle("is-far", !en.isIntersecting);
-          if (en.isIntersecting && auto) video.preload = "auto";
+          if (en.isIntersecting && auto) getFilm();
         }), { rootMargin: "100% 0px" }).observe(reel);
         // the introduction covers the middle of the screen: play; it has gone: pause
         new IntersectionObserver((entries) => entries.forEach((en) => {
-          if (en.isIntersecting) { if (auto && !userPaused) play(); }
+          inView = en.isIntersecting;
+          if (inView) { if (auto && !userPaused) play(false); }
           else if (!video.paused) video.pause();
         }), { rootMargin: "-30% 0px -30% 0px" }).observe(reel);
       }
@@ -1027,7 +1045,7 @@
       if (loaded) return;
       loaded = true;
       evo.preload = "auto";
-      evo.src = evo.dataset.src;
+      loadFilm(evo, evo.dataset.src);
     };
     if ("IntersectionObserver" in window) {
       const io = new IntersectionObserver((en) => { if (en.some((e) => e.isIntersecting)) { load(); io.disconnect(); } }, { rootMargin: "150% 0px" });
