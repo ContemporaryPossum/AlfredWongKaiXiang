@@ -225,14 +225,14 @@
   /* ---------- hero: the ink T-rex bites a chunk out of "excuses." ---------- */
   // Everything in this scene is worked out from how far you have scrolled through the hero (p, 0 to 1), so scrolling
   // back plays it in reverse. "excuses." stays in front of the T-rex while it rises and bites (styles.css gives it
-  // the higher z-index); "Good websites." stays behind it and shows through the open mouth, which is see-through.
+  // the higher z-index); "Good websites." stays behind it: the inside of the mouth is dark, and the page shows in front of the jaws.
   // The bite removes the part of the word inside the jaws and leaves a scalloped tooth mark on what is left. The
   // bitten piece stays between the teeth while the head shakes (only the inside of the mouth shows it, so the teeth
   // overlap it) and is chewed away as the T-rex leaves. What is left of the word tumbles to the ground.
   // BITE says where the mouth is in each drawing, as fractions of the picture. Measure again if you replace them.
   const BITE = {
-    open: [0.30, 0.41],  // middle of the open mouth (rex-open-5.webp)
-    half: [0.28, 0.345], // middle of the half-open mouth (rex-half-5.webp)
+    open: [0.30, 0.41],  // middle of the open mouth (rex-open-6.webp)
+    half: [0.28, 0.345], // middle of the half-open mouth (rex-half-6.webp)
     bite: [0.22, 0.31],  // where the closed teeth meet (rex-bite.webp)
     span: [0.10, 0.36]   // front and back of the closed jaws
   };
