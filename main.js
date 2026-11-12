@@ -69,7 +69,10 @@
     let lastW = window.innerWidth, lastH = window.innerHeight, timer = 0;
     window.addEventListener("resize", () => {
       const w = window.innerWidth, h = window.innerHeight;
-      if (!finePointer && w === lastW && Math.abs(h - lastH) < 160) return;
+      // (nor is the on-screen keyboard of browsers that shrink the page for it)
+      // (only fields that bring up the keyboard: a tapped radio or checkbox keeps focus too, and must not block a real resize)
+      const typing = document.activeElement && document.activeElement.matches && document.activeElement.matches("textarea, [contenteditable]:not([contenteditable='false']), input:not([type]), input[type='text'], input[type='search'], input[type='email'], input[type='tel'], input[type='url'], input[type='number'], input[type='password']");
+      if (!finePointer && w === lastW && (Math.abs(h - lastH) < 160 || typing)) return;
       lastW = w; lastH = h;
       clearTimeout(timer);
       timer = setTimeout(relayout, 120);
@@ -424,7 +427,16 @@
         const x = atLeft ? s0 - R() * ww * 0.06 : s1 + R() * ww * 0.06;
         splats.push({ x, y: by + (R() - 0.5) * wh * 0.8, r: r0, te: ACT.snap + 0.003 + i * 0.003, lobes, sats, drips });
       }
-      L = { W, H, bx, by, rw, rh, ww, wh, unit, lets, keep, drops, shades, splats, bitten: null };
+      // the point after which nothing in the blood moves any more: every drop has landed, every splat has spread
+      // and every drip has reached its full length (drawBlood stops redrawing there)
+      let settle = ACT.snap;
+      drops.forEach((group) => group.forEach((d) => { settle = Math.max(settle, d.te + d.life / 3); }));
+      splats.forEach((s) => {
+        settle = Math.max(settle, s.te + 0.014);
+        s.drips.forEach((d) => { settle = Math.max(settle, s.te + 0.012 + d.max / (unit * d.speed * 3)); });
+      });
+      L = { W, H, bx, by, rw, rh, ww, wh, unit, lets, keep, drops, shades, splats, bitten: null, settle };
+      bloodAt = -1;
       if (bctx) {
         const dpr = Math.min(window.devicePixelRatio || 1, 2);
         bloodCanvas.width = Math.round(W * dpr);
@@ -512,12 +524,23 @@
     };
 
     // the blood is only drawn after the bite; before it the canvas is cleared once and left alone
-    let bloodOn = false;
-    const drawBlood = (p) => {
+    // (and once it has all landed it is drawn one last time and left alone too)
+    let bloodOn = false, bloodAt = -1;
+    // a reset of the graphics card hands the canvas back blank, with its scale reset: set the scale again and draw it anew
+    if (bctx) bloodCanvas.addEventListener("contextrestored", () => {
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      bctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      bloodAt = -1;
+      requestAnimationFrame(() => runScenes(true));
+    });
+    const drawBlood = (pScroll) => {
       if (!bctx) return;
-      if (p < ACT.snap && !bloodOn) return;
+      if (pScroll < ACT.snap && !bloodOn) return;
+      const p = Math.min(pScroll, L.settle);
+      if (bloodOn && pScroll >= ACT.snap && p === bloodAt) return; // nothing has moved since the last drawing
       bctx.clearRect(0, 0, L.W, L.H);
-      bloodOn = p >= ACT.snap;
+      bloodOn = pScroll >= ACT.snap;
+      bloodAt = bloodOn ? p : -1;
       if (!bloodOn) return;
       const g = L.unit * 8;
       L.splats.forEach((s) => {
@@ -596,9 +619,17 @@
       let heroTop = 0, heroH = 1;
       measures.push(() => { heroTop = docTop(hero); heroH = hero.offsetHeight; });
       layouts.push(layout);
+      let heroAway = false;
       scenes.push((y, vh) => {
         if (!L) return;
-        if (y > heroTop + heroH || y + vh < heroTop) { fx.bite = 0; return; }
+        if (y > heroTop + heroH || y + vh < heroTop) {
+          fx.bite = 0;
+          // out of sight, whatever pose a fast fling or a glide left it in: the T-rex (and its endless bob) and the scroll
+          // cue rest, as they would otherwise keep the browser busy every frame; coming back poses everything again
+          if (!heroAway) { heroAway = true; rex.classList.remove("is-on"); hero.classList.add("is-moving"); }
+          return;
+        }
+        heroAway = false;
         const p = clamp((y - heroTop) / Math.max(1, heroH - vh), 0, 1);
         pose(p, false);
         drawBlood(p);
@@ -692,6 +723,534 @@
     }
   }
 
+  /* ---------- SCAN: an 8-bit voxel tree that is secretly a QR code ---------- */
+  // Every leaf, branch and hedge stands in a column above a dark square of a real QR code that opens
+  // https://wa.me/60173534960, and nothing at all stands above a light square. From the side that is just a leafy tree
+  // on some paving. Tap the tree and the camera rises and swings round until it looks straight down, and the tree itself
+  // lines up into the QR code, flat and ready to scan: nothing moves but the camera. Tap again and the camera comes back
+  // down. It starts from above and comes down once when it first comes into view.
+  // A caveman naps against the trunk while another runs laps around the tree, chased by a T-rex. The wind blows: leaves
+  // drift sideways as they fall, the crown sways and the leaves shimmer in waves.
+  // The voxels are drawn by hand onto a small canvas, one hard-edged pixel at a time, and scaled up without smoothing: that
+  // is the 8-bit look, and it keeps the code perfectly sharp for scanning. The characters come from scan-sprites.webp.
+  // It only draws while it is on screen. With reduced motion it stays still, starts from above, and tapping just swaps the views.
+  // QR_ROWS is the code itself, made for that one address. If the WhatsApp number changes it must be remade (see the README).
+  const scanBtn = $("[data-scan-toggle]"), scanCanvas = $("[data-scan-canvas]");
+  if (scanBtn && scanCanvas && scanCanvas.getContext) {
+    const QR_ROWS = [
+      "11111110011111100111001111111",
+      "10000010011111000100101000001",
+      "10111010111100011101101011101",
+      "10111010001101000011001011101",
+      "10111010110001010010101011101",
+      "10000010100010001011001000001",
+      "11111110101010101010101111111",
+      "00000000000000001110000000000",
+      "01001010100111100011010110100",
+      "11100101100110100101100011011",
+      "01101110100111001110110101101",
+      "01000100001111000110010100011",
+      "01111110101110101101100100001",
+      "00111101011000001110001010100",
+      "11011110111111000010100010000",
+      "00001101110011111001110101001",
+      "10000110111101101001111100010",
+      "11010001000011000011000100101",
+      "00110111100110110111000110101",
+      "00011001110000111111100111101",
+      "11101010010011000110111110011",
+      "00000000110111011010100010100",
+      "11111110001000110101101010011",
+      "10000010001001010111100011010",
+      "10111010101000110011111110000",
+      "10111010000111101000000101000",
+      "10111010011110001101110000111",
+      "10000010100000000101011100111",
+      "11111110010010110011110010010"
+    ];
+    const n = QR_ROWS.length, QUIET = 4, N = n + QUIET * 2;                 // the code, plus its blank margin
+    const W = scanCanvas.width, H = scanCanvas.height, MID = N / 2;
+    const TILE = 8, FY = 34;                                                // from above: size of a square, top of the plate
+    const ZOOM0 = 4 * Math.SQRT2, ZK = 4 / (ZOOM0 * Math.cos(Math.PI / 6)); // the slanted view: a 2:1 pixel-art tile, cubes 4 pixels tall
+    const CY0 = 170, CY1 = FY + (N * TILE) / 2;                             // where the middle of the ground sits on the canvas
+    const FOLD = 1500, GROW = 1500;                                         // how long the camera takes each way, in milliseconds
+    const SPR = {"run":{"y":0,"w":33,"h":40,"n":8},"dino":{"y":40,"w":75,"h":46,"n":8},"rest":{"y":86,"w":48,"h":28,"n":6}};                                                // where the characters are in scan-sprites.webp
+    const LAP = { radius: 12.5, speed: 0.95, gap: 0.78 };                   // the chase: cells from the trunk, radians a second, the T-rex's lead
+    const ctx = scanCanvas.getContext("2d");
+    ctx.imageSmoothingEnabled = false;
+    const img = ctx.createImageData(W, H);
+    const buf = new Uint32Array(img.data.buffer);
+    const rgb = (hex) => [parseInt(hex.slice(1, 3), 16), parseInt(hex.slice(3, 5), 16), parseInt(hex.slice(5, 7), 16)];
+    const pack = (c) => ((255 << 24) | (c[2] << 16) | (c[1] << 8) | c[0]) >>> 0;
+    const shade = (c, k) => [Math.round(c[0] * k), Math.round(c[1] * k), Math.round(c[2] * k)];
+    const faces = (hex) => { const c = rgb(hex); return { c, t: pack(c), l: pack(shade(c, 0.84)), r: pack(shade(c, 0.66)) }; };
+    const R = seeded(2026);
+    const pick = (list) => list[Math.floor(R() * list.length)];
+    // the wind: a steady breeze from the left with slower gusts on top (0 to about 1)
+    const gustAt = (t) => clamp(0.45 + 0.35 * Math.sin(t * 0.7) + 0.2 * Math.sin(t * 1.9 + 1), 0, 1);
+
+    // the palette: a small set of colours, as an 8-bit console would have
+    const CREAM = pack(rgb("#f2efe9")), CREAM_SHADOW = pack(rgb("#d9d0c2"));
+    const SIDE_L = pack(rgb("#d4cabb")), SIDE_R = pack(rgb("#b3a897")), SOIL_L = pack(rgb("#5c3a24")), SOIL_R = pack(rgb("#452a19"));
+    const STONES = ["#bdb4a7", "#aca395", "#c9c2b5", "#a0978a"].map(faces);                 // the dark squares, seen from the side: plain paving
+    const MODULES = ["#a63a12", "#8f2f0e", "#b0401a", "#7a2609", "#9c3610"].map(faces);     // from above, tops deepen to these: dark enough on cream to scan
+    const LEAVES = ["#ffc18a", "#ffa05f", "#ff8347", "#ff6a3d", "#e8562a", "#c9441d"].map(faces);
+    const BARK = ["#7a4a28", "#6b3f22", "#5c341b"].map(faces);
+    const HEDGE = ["#e8a33d", "#d98a2b", "#c9781f"].map(faces);
+    const TUFT = ["#e8a33d", "#f0b95a", "#d98a2b"].map(faces);
+    const FINDER_FLAT = faces("#5a1f08");
+    const TANGERINE = "#ff6a3d";
+
+    const cubes = [];
+    const isDark = (x, y) => { const c = x - QUIET, r = y - QUIET; return r >= 0 && c >= 0 && r < n && c < n && QR_ROWS[r][c] === "1"; };
+    const inFinder = (x, y) => { const c = x - QUIET, r = y - QUIET; return (c < 7 && r < 7) || (c >= n - 7 && r < 7) || (c < 7 && r >= n - 7); };
+    // the trunk stands on the thickest patch of dark squares near the middle, because it may only stand on dark squares too
+    let CX = Math.floor(MID), CY = Math.floor(MID), bestPatch = -1;
+    for (let y = Math.floor(MID) - 5; y <= MID + 5; y++) for (let x = Math.floor(MID) - 5; x <= MID + 5; x++) {
+      let dark = 0;
+      for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) if (dx * dx + dy * dy <= 5 && isDark(x + dx, y + dy)) dark++;
+      const score = dark - Math.hypot(x - MID, y - MID) * 0.5;
+      if (score > bestPatch) { bestPatch = score; CX = x; CY = y; }
+    }
+    const NAP = { x: CX - 1, y: CY + 5.5 };                                 // where the sleeper lies, with his head at the trunk
+    const shadowed = (x, y) => (x + y) % 2 === 0 && Math.hypot(x - CX - 1, y - CY - 1) < 13;  // a dithered shadow under the tree
+
+    // ----- the camera. k = 0 is the slanted view, k = 1 is looking straight down. It really does turn and tilt: the ground
+    // rotates from a diamond to a square while the view rises from 30 degrees to overhead, zooming in a little on the way.
+    let ax = 0, bx = 0, ay = 0, by = 0, cz = 0, oy = 0, rise = 1;
+    const camera = (k) => {
+      const yaw = (1 - k) * Math.PI / 4, pitch = Math.PI / 6 + k * Math.PI / 3, zoom = ZOOM0 + (TILE - ZOOM0) * k;
+      const sp = Math.sin(pitch), cp = k === 1 ? 0 : Math.cos(pitch);
+      ax = zoom * Math.cos(yaw); bx = -zoom * Math.sin(yaw);
+      ay = zoom * Math.sin(yaw) * sp; by = zoom * Math.cos(yaw) * sp;
+      cz = -zoom * cp * ZK; oy = CY0 + (CY1 - CY0) * k;
+      rise = cp / Math.cos(Math.PI / 6);                                    // how tall things standing on the ground look now
+    };
+    const sx = (x, y) => W / 2 + ax * (x - MID) + bx * (y - MID);
+    const sy = (x, y, z) => oy + ay * (x - MID) + by * (y - MID) + cz * z;
+
+    // how far each row of pixels of the tree is pushed sideways by the wind, more towards the top
+    const shifts = new Int8Array(H);
+    let rowTop = 0, rowEnd = 0, rowFoot = 0, leaning = false;
+    const sway = (t, amount) => {
+      const gust = gustAt(t);
+      for (let y = 0; y < H; y++) {
+        const up = clamp((rowFoot - y) / Math.max(1, rowFoot - rowTop), 0, 1);
+        shifts[y] = Math.round(up * up * 4.5 * amount * (gust * 0.8 + 0.35 * Math.sin(t * 1.5 + y * 0.03)));
+      }
+    };
+
+    // fills a four-sided shape with hard edges (the top-left rule, so neighbours never gap or overlap)
+    const quad = (x0, y0, x1, y1, x2, y2, x3, y3, c) => {
+      const lo = Math.min(y0, y1, y2, y3), hi = Math.max(y0, y1, y2, y3);
+      const yMin = Math.max(0, Math.ceil(lo - 0.5)), yMax = Math.min(H - 1, Math.ceil(hi - 0.5) - 1);
+      for (let r = yMin; r <= yMax; r++) {
+        const yc = r + 0.5;
+        let a = Infinity, b = -Infinity, v;
+        if ((y0 <= yc) !== (y1 <= yc)) { v = x0 + (yc - y0) * (x1 - x0) / (y1 - y0); if (v < a) a = v; if (v > b) b = v; }
+        if ((y1 <= yc) !== (y2 <= yc)) { v = x1 + (yc - y1) * (x2 - x1) / (y2 - y1); if (v < a) a = v; if (v > b) b = v; }
+        if ((y2 <= yc) !== (y3 <= yc)) { v = x2 + (yc - y2) * (x3 - x2) / (y3 - y2); if (v < a) a = v; if (v > b) b = v; }
+        if ((y3 <= yc) !== (y0 <= yc)) { v = x3 + (yc - y3) * (x0 - x3) / (y0 - y3); if (v < a) a = v; if (v > b) b = v; }
+        const lean = leaning ? shifts[r] : 0;
+        const i0 = Math.max(0, Math.ceil(a - 0.5) + lean), i1 = Math.min(W, Math.ceil(b - 0.5) + lean), o = r * W;
+        for (let i = i0; i < i1; i++) buf[o + i] = c;
+      }
+    };
+    const ease = (x) => (x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2);
+
+    // As the view rises, the tops of the cubes deepen to the colours the code needs to scan. Each cube's pair of colours is
+    // worked out once per frame here, so that only a few dozen colours are mixed rather than thousands.
+    const pairs = [], pairOf = new Map();
+    let pairCol = new Uint32Array(0), pairAt = -1;
+    const pairIndex = (a, b) => {
+      const key = a.t + ">" + b.t;
+      if (!pairOf.has(key)) { pairOf.set(key, pairs.length); pairs.push([a.c, b.c]); }
+      return pairOf.get(key);
+    };
+    const mixPairs = (m) => {
+      if (m === pairAt) return;
+      pairAt = m;
+      for (let i = 0; i < pairs.length; i++) {
+        const a = pairs[i][0], b = pairs[i][1];
+        pairCol[i] = pack([Math.round(a[0] + (b[0] - a[0]) * m), Math.round(a[1] + (b[1] - a[1]) * m), Math.round(a[2] + (b[2] - a[2]) * m)]);
+      }
+    };
+
+    // draws the voxels from the camera at k. which: 1 the ground, 2 the tree, 3 both. With ids, each face is drawn in its
+    // own number instead of its colour, which is what lets the leaves shimmer without drawing the tree again.
+    const draw = (k, which, ids, lean) => {
+      buf.fill(0);
+      camera(k);
+      leaning = false;
+      mixPairs(clamp((k - 0.3) / 0.7, 0, 1));
+      if (which & 1) {
+        if (rise > 0.005) {
+          quad(sx(0, N), sy(0, N, 0), sx(N, N), sy(N, N, 0), sx(N, N), sy(N, N, -1), sx(0, N), sy(0, N, -1), SIDE_L);
+          quad(sx(N, 0), sy(N, 0, 0), sx(N, N), sy(N, N, 0), sx(N, N), sy(N, N, -1), sx(N, 0), sy(N, 0, -1), SIDE_R);
+          quad(sx(0, N), sy(0, N, -1), sx(N, N), sy(N, N, -1), sx(N, N), sy(N, N, -3), sx(0, N), sy(0, N, -3), SOIL_L);
+          quad(sx(N, 0), sy(N, 0, -1), sx(N, N), sy(N, N, -1), sx(N, N), sy(N, N, -3), sx(N, 0), sy(N, 0, -3), SOIL_R);
+        }
+        quad(sx(0, 0), sy(0, 0, 0), sx(N, 0), sy(N, 0, 0), sx(N, N), sy(N, N, 0), sx(0, N), sy(0, N, 0), CREAM);
+        if (k < 0.3) for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+          if (!shadowed(x, y) || isDark(x, y)) continue;
+          quad(sx(x, y), sy(x, y, 0), sx(x + 1, y), sy(x + 1, y, 0), sx(x + 1, y + 1), sy(x + 1, y + 1, 0), sx(x, y + 1), sy(x, y + 1, 0), CREAM_SHADOW);
+        }
+      }
+      for (let i = 0; i < cubes.length; i++) {
+        const q = cubes[i], tree = q.kind === 3;
+        if (tree ? !(which & 2) : !(which & 1)) continue;
+        leaning = tree && !!lean;
+        const x0 = q.x, x1 = q.x + 1, y0 = q.y, y1 = q.y + 1, z0 = q.z;
+        let z1 = z0 + q.h;
+        if (q.kind === 2) {                                                 // grass on the light squares sinks away, leaving them clean
+          if (k > 0.5) continue;
+          z1 = z0 + q.h * (1 - k / 0.5);
+        }
+        const tx0 = sx(x0, y0), ty0 = sy(x0, y0, z1), tx1 = sx(x1, y0), ty1 = sy(x1, y0, z1), tx2 = sx(x1, y1), ty2 = sy(x1, y1, z1), tx3 = sx(x0, y1), ty3 = sy(x0, y1, z1);
+        if (rise > 0.005) {
+          if (q.left) quad(tx3, ty3, tx2, ty2, tx2, sy(x1, y1, z0), tx3, sy(x0, y1, z0), ids ? i * 3 + 2 : q.f.l);
+          if (q.right) quad(tx1, ty1, tx2, ty2, tx2, sy(x1, y1, z0), tx1, sy(x1, y0, z0), ids ? i * 3 + 3 : q.f.r);
+        }
+        if (q.top) quad(tx0, ty0, tx1, ty1, tx2, ty2, tx3, ty3, ids ? i * 3 + 1 : (q.pi >= 0 ? pairCol[q.pi] : q.f.t));
+      }
+      leaning = false;
+    };
+
+    // ----- the tree in the wind, the old arcade way: every pixel of the tree remembers which face it belongs to (faceAt), so
+    // the leaves shimmer by changing the colour of each face rather than drawing the tree again, and the crown sways by
+    // sliding each row of pixels a little sideways, more towards the top.
+    const treeLayer = document.createElement("canvas"), groundLayer = document.createElement("canvas");
+    groundLayer.width = treeLayer.width = W; groundLayer.height = treeLayer.height = H;
+    const treeCtx = treeLayer.getContext("2d");
+    const treeImg = treeCtx.createImageData(W, H), treeOut = new Uint32Array(treeImg.data.buffer);
+    let faceAt = null, faceCol = null, leafCubes = [];
+    const paintTree = (t) => {
+      const gust = reduceMotion ? 0 : gustAt(t);
+      if (reduceMotion) shifts.fill(0);
+      else {
+        sway(t, 1);
+        for (let j = 0; j < leafCubes.length; j++) {
+          const i = leafCubes[j], q = cubes[i];
+          // a wave of light running through the crown with the wind, and each leaf flickering on its own
+          const wave = Math.sin((q.x - q.y) * 0.45 + (q.x + q.y) * 0.2 + q.z * 0.35 - t * 3.4) * (0.35 + gust * 0.6);
+          const flick = Math.sin(t * (5 + q.ph * 6) + q.ph * 40) * 0.7;
+          const p = clamp(Math.round(q.p + wave + flick), 0, LEAVES.length - 1), L = LEAVES[p];
+          faceCol[i * 3 + 1] = L.t; faceCol[i * 3 + 2] = L.l; faceCol[i * 3 + 3] = L.r;
+        }
+      }
+      treeOut.fill(0);
+      for (let y = rowTop; y <= rowEnd; y++) {
+        const shift = shifts[y], o = y * W;
+        for (let x = 0; x < W; x++) {
+          const id = faceAt[o + x];
+          if (!id) continue;
+          const nx = x + shift;
+          if (nx >= 0 && nx < W) treeOut[o + nx] = faceCol[id];
+        }
+      }
+      treeCtx.putImageData(treeImg, 0, 0);
+    };
+
+    // ----- the characters and the falling leaves, drawn over the voxels
+    const sheet = new Image();
+    const sprite = (name, frame, footX, footY, flip, squash) => {
+      const s = SPR[name], dh = Math.max(1, Math.round(s.h * squash));
+      const x = Math.round(footX - s.w / 2), y = Math.round(footY - dh);
+      if (flip) {
+        ctx.save(); ctx.translate(x + s.w, y); ctx.scale(-1, 1);
+        ctx.drawImage(sheet, frame * s.w, s.y, s.w, s.h, 0, 0, s.w, dh);
+        ctx.restore();
+      } else ctx.drawImage(sheet, frame * s.w, s.y, s.w, s.h, x, y, s.w, dh);
+    };
+    // the two who are running: their place on the lap, whether they are in front of the tree, and which way they face
+    const runner = (name, angle, now, fps) => {
+      const x = CX + 0.5 + Math.cos(angle) * LAP.radius, y = CY + 0.5 + Math.sin(angle) * LAP.radius;
+      return { name, x, y, front: Math.sin(angle) + Math.cos(angle) > 0, flip: ax * -Math.sin(angle) + bx * Math.cos(angle) < 0, frame: Math.floor(now / 1000 * fps) % SPR[name].n, sy: sy(x, y, 0) };
+    };
+    const placeRunners = (now) => {
+      const a = reduceMotion ? 0.1 : now / 1000 * LAP.speed;                // standing still, they stay clear of the sleeper
+      return [runner("run", a, now, 13), runner("dino", a - LAP.gap, now, 11)].sort((p, q) => p.sy - q.sy);
+    };
+    const drawRunners = (list, wantFront, squash) => {
+      list.forEach((p) => {
+        if (p.front !== wantFront) return;
+        const fx = sx(p.x, p.y), fy = sy(p.x, p.y, 0), w = SPR[p.name].w * 0.5;
+        ctx.fillStyle = "rgba(70, 48, 30, 0.38)";                           // a small shadow on the ground
+        ctx.fillRect(Math.round(fx - w / 2), Math.round(fy - 1), Math.round(w), 2);
+        sprite(p.name, p.frame, fx, fy, p.flip, squash);
+      });
+    };
+    const drawSleeper = (now, squash) => {
+      const s = SPR.rest;
+      sprite("rest", Math.floor(now / 330) % s.n, sx(NAP.x, NAP.y), sy(NAP.x, NAP.y, 0), true, squash);
+    };
+    // a 5 by 7 pixel font, just the letters the labels need
+    const FONT = { A: "01110100011000111111100011000110001", C: "01110100011000010000100001000101110", E: "11111100001000011110100001000011111", H: "10001100011000111111100011000110001", M: "10001110111010110101100011000110001", N: "10001110011010110011100011000110001", P: "11110100011000111110100001000010000", R: "11110100011000111110101001001010001", S: "01111100001000001110000010000111110", T: "11111001000010000100001000010000100", Z: "11111000010001000100010001000011111" };
+    const text = (str, x, y, size, color) => {
+      ctx.fillStyle = color;
+      for (const ch of str) {
+        const g = FONT[ch];
+        if (g) for (let i = 0; i < 35; i++) if (g[i] === "1") ctx.fillRect(x + (i % 5) * size, y + Math.floor(i / 5) * size, size, size);
+        x += 6 * size;
+      }
+    };
+    const label = (str, y) => text(str, Math.round((W - (str.length * 12 - 2)) / 2), y, 2, TANGERINE);
+
+    // leaves torn off by the wind: they tumble sideways as they fall, and those that reach the ground skitter along it for a moment
+    const fall = [], streaks = [];
+    // a leaf as it turns over in the air, row by row: where the row starts, how wide it is, whether it ends in the darker edge
+    const LEAF = [[1, 3, 0, 0, 5, 1, 1, 3, 1], [2, 2, 0, 1, 3, 1, 0, 2, 1], [0, 5, 1], [0, 2, 0, 1, 3, 1, 2, 2, 1]];
+    const onPlate = (x, y) => Math.abs(x - W / 2) / 145 + Math.abs(y - CY0) / 72 < 1;
+    const spawnLeaf = (l) => { l.x = W / 2 - 110 + R() * 190; l.y = 70 + R() * 65; l.end = 150 + R() * 95; l.v = 15 + R() * 14; l.d = 0.75 + R() * 0.6; l.land = 0; };
+    const spawnStreak = (s) => { s.x = -30 - R() * 120; s.y = 20 + R() * 250; s.len = 8 + Math.floor(R() * 16); s.v = 150 + R() * 130; };
+    const windStep = (t, step) => {
+      const gust = gustAt(t), wind = 16 + gust * 48;
+      fall.forEach((l) => {
+        if (l.land > 0) {
+          l.x += wind * 0.3 * l.d * step;
+          l.land -= step;
+          if (l.land <= 0 || !onPlate(l.x, l.y)) spawnLeaf(l);
+          return;
+        }
+        l.x += wind * l.d * step;
+        l.y += l.v * step;
+        if (l.y > l.end && onPlate(l.x, l.y)) l.land = 0.8 + R() * 1.4;
+        else if (l.x > W + 6 || l.y > 272) spawnLeaf(l);                    // blown off the edge: gone before it reaches the label
+      });
+      streaks.forEach((s) => { s.x += s.v * (0.4 + gust) * step; if (s.x > W + 10) spawnStreak(s); });
+    };
+    const drawWind = (now) => {
+      const t = now / 1000, gust = gustAt(t);
+      fall.forEach((l) => {
+        // a leaf tumbling: wide, then narrow, then tall
+        const shape = LEAF[l.land > 0 ? 0 : Math.floor(t * 6 + l.p) % LEAF.length];
+        const x = Math.round(l.x + (l.land > 0 ? 0 : Math.sin(t * 2.4 + l.p) * 3)), y = Math.round(l.y);
+        ctx.fillStyle = l.c;
+        for (let i = 0; i < shape.length; i += 3) ctx.fillRect(x + shape[i], y + i / 3, shape[i + 1], 1);
+        ctx.fillStyle = l.e;                                                // a darker edge, so it shows up against the crown too
+        for (let i = 0; i < shape.length; i += 3) if (shape[i + 2]) ctx.fillRect(x + shape[i] + shape[i + 1] - 1, y + i / 3, 1, 1);
+      });
+      // thin streaks of wind in the gusts
+      if (gust > 0.45) {
+        ctx.fillStyle = "rgba(242, 239, 233, " + ((gust - 0.45) * 0.55).toFixed(3) + ")";
+        streaks.forEach((s) => {
+          const x = Math.round(s.x), y = Math.round(s.y);
+          ctx.fillRect(x, y, s.len, 1);
+          ctx.fillRect(x + s.len + 3, y, 3, 1);
+        });
+      }
+    };
+
+    // ----- the finished views. The slanted one is built from two layers, so that characters can pass behind the tree
+    const paintScene = (now) => {
+      camera(0);
+      const ready = sheet.complete && sheet.naturalWidth > 0;
+      const list = ready ? placeRunners(now) : [];
+      paintTree(now / 1000);
+      ctx.clearRect(0, 0, W, H);
+      ctx.drawImage(groundLayer, 0, 0);
+      if (ready) drawRunners(list, false, 1);
+      ctx.drawImage(treeLayer, 0, 0);
+      if (ready) {
+        drawSleeper(now, 1);
+        drawRunners(list, true, 1);
+        // he is fast asleep
+        const zx = sx(NAP.x, NAP.y) + 18, zy = sy(NAP.x, NAP.y, 0) - 34;
+        for (let i = 0; i < 3; i++) {
+          const z = reduceMotion ? i / 3 : ((now / 2400 + i / 3) % 1);
+          text("Z", Math.round(zx + z * 9 + Math.sin(z * 6) * 2), Math.round(zy - z * 22), 1, "#f2efe9");
+        }
+      }
+      if (!reduceMotion) drawWind(now);
+      if (reduceMotion || Math.floor(now / 650) % 3 !== 2) label("TAP THE TREE", 288);
+    };
+    const paintFlat = () => { draw(1, 3); ctx.putImageData(img, 0, 0); label("SCAN ME", 11); };
+    // a frame of the camera move: everything standing on the ground flattens and fades as the view rises
+    const paintMove = (now, step) => {
+      const k = ease(f);
+      sway(now / 1000, Math.pow(1 - clamp(k / 0.6, 0, 1), 2));              // the wind's lean dies away as the view rises, so the code lands straight
+      draw(k, 3, false, true);
+      ctx.putImageData(img, 0, 0);
+      const fade = 1 - clamp(k / 0.45, 0, 1);
+      if (fade <= 0) return;
+      ctx.globalAlpha = fade;
+      if (sheet.complete && sheet.naturalWidth) {
+        const list = placeRunners(now);
+        drawRunners(list, false, rise);
+        drawSleeper(now, rise);
+        drawRunners(list, true, rise);
+      }
+      windStep(now / 1000, step);
+      drawWind(now);
+      ctx.globalAlpha = 1;
+    };
+
+    // built once, when the browser is idle after the page has loaded or when the section comes near, whichever is first,
+    // so that it never slows down the first load
+    let built = false;
+    const build = () => {
+      if (built) return;
+      built = true;
+      const crownR = 13;
+      const crownX = (CX + MID) / 2, crownY = (CY + MID) / 2;
+      // the ground: the corner squares of the code are hedges, the dark squares under the tree are paving, those beyond it grass
+      for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+        if (!isDark(x, y)) continue;
+        const m = pick(MODULES);
+        if (inFinder(x, y)) { const f3 = pick(HEDGE); cubes.push({ kind: 1, x, y, z: 0, h: 1 + R() * 0.9, f: f3, pi: pairIndex(f3, FINDER_FLAT), top: true, left: true, right: true }); }
+        else if (Math.hypot(x - crownX, y - crownY) > crownR - 1.5) { const f3 = pick(HEDGE); cubes.push({ kind: 0, x, y, z: 0, h: 0.5 + R() * 0.9, f: f3, pi: pairIndex(f3, m), top: true, left: true, right: true }); }
+        else { const f3 = pick(STONES); cubes.push({ kind: 0, x, y, z: 0, h: 0.3, f: f3, pi: pairIndex(f3, m), top: true, left: true, right: true }); }
+      }
+      // tufts of dry grass on the light squares of the margin; they sink away as the view rises
+      for (let i = 0; i < 90; i++) {
+        const x = Math.floor(R() * N), y = Math.floor(R() * N);
+        const nearEdge = x < QUIET || y < QUIET || x >= N - QUIET || y >= N - QUIET;
+        if (isDark(x, y) || !(nearEdge || R() < 0.08)) continue;
+        cubes.push({ kind: 2, x, y, z: 0, h: 0.5 + R() * 0.8, f: pick(TUFT), pi: -1, top: true, left: true, right: true });
+      }
+      // the tree. put3 is the whole trick: nothing can be placed above a light square of the code
+      const grid = new Map();
+      const key = (x, y, z) => x + "," + y + "," + z;
+      const put3 = (x, y, z, f3, p) => { if (z >= 0 && isDark(x, y)) grid.set(key(x, y, z), { x, y, z, f: f3, p }); };
+      const TRUNK = 19;
+      for (let z = 0; z < TRUNK; z++) {
+        const r2 = z < 2 ? 8 : z < 9 ? 5 : 2.5;                             // thick at the root, thinner going up
+        for (let dy = -3; dy <= 3; dy++) for (let dx = -3; dx <= 3; dx++) if (dx * dx + dy * dy <= r2) put3(CX + dx, CY + dy, z, pick(BARK), -1);
+      }
+      // branches climb outwards, stepping only from dark square to dark square
+      for (let i = 0; i < 16; i++) {
+        const a = (i / 16) * Math.PI * 2 + R() * 0.3;
+        let x = CX, y = CY, z = 9 + R() * 9;
+        for (let s = 0; s < 14; s++) {
+          const nx = x + Math.round(Math.cos(a) + (R() - 0.5) * 0.9), ny = y + Math.round(Math.sin(a) + (R() - 0.5) * 0.9);
+          z += 0.5 + R() * 0.4;
+          if (!isDark(nx, ny)) continue;
+          x = nx; y = ny;
+          put3(x, y, Math.round(z), pick(BARK), -1);
+        }
+      }
+      // the crown: a heart and a ring of lumps around it
+      const blobs = [[crownX, crownY, 25, 9], [crownX - 1, crownY - 1, 30, 7]];
+      for (let i = 0; i < 16; i++) {
+        const a = (i / 16) * Math.PI * 2 + R() * 0.4, d = 6.5 + R() * 4.5;
+        const lump = [crownX + Math.cos(a) * d, crownY + Math.sin(a) * d, 18 + R() * 10, 4 + R() * 2.6];
+        // lumps at the back of the tree sit higher on the screen: keep them inside the canvas
+        const topY = CY0 + (lump[0] - MID + lump[1] - MID) * 2 - (lump[2] + lump[3]) * 4;
+        if (topY < 12) lump[2] -= (12 - topY) / 4;
+        blobs.push(lump);
+      }
+      blobs.forEach(([bx3, by3, bz, br]) => {
+        const m = Math.ceil(br + 1);
+        for (let z = Math.floor(bz - m); z <= bz + m; z++) for (let y = Math.floor(by3 - m); y <= by3 + m; y++) for (let x = Math.floor(bx3 - m); x <= bx3 + m; x++) {
+          const d = Math.hypot(x - bx3, y - by3, (z - bz) * 1.08);
+          if (d > br * (0.84 + R() * 0.26) || R() < 0.1) continue;          // rough edges and plenty of holes, so it looks leafy
+          const idx = clamp(Math.round((1 - (z - 15) / 24) * 4 + R() * 2 - 0.6), 0, LEAVES.length - 1);
+          put3(x, y, z, LEAVES[idx], idx);
+        }
+      });
+      // only the three sides that face the camera can show, so cubes hidden on all three are left out
+      grid.forEach((v) => {
+        const top = !grid.has(key(v.x, v.y, v.z + 1)), left = !grid.has(key(v.x, v.y + 1, v.z)), right = !grid.has(key(v.x + 1, v.y, v.z));
+        if (!top && !left && !right) return;
+        // from above, whatever is on top of a column turns the colour of that square of the code
+        cubes.push({ kind: 3, x: v.x, y: v.y, z: v.z, h: 1, f: v.f, p: v.p, ph: R(), top, left, right, pi: pairIndex(v.f, inFinder(v.x, v.y) ? FINDER_FLAT : pick(MODULES)) });
+      });
+      cubes.sort((a, b) => (a.x + a.y + a.z) - (b.x + b.y + b.z));
+      pairCol = new Uint32Array(pairs.length);
+      pairAt = -1;
+      // the ground layer, and a map of which face each pixel of the tree belongs to
+      draw(0, 1); groundLayer.getContext("2d").putImageData(img, 0, 0);
+      draw(0, 2, true); faceAt = buf.slice();
+      faceCol = new Uint32Array(cubes.length * 3 + 4);
+      cubes.forEach((q, i) => { faceCol[i * 3 + 1] = q.f.t; faceCol[i * 3 + 2] = q.f.l; faceCol[i * 3 + 3] = q.f.r; if (q.kind === 3 && q.p >= 0) leafCubes.push(i); });
+      rowTop = H; rowEnd = 0;
+      for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (faceAt[y * W + x]) { if (y < rowTop) rowTop = y; if (y > rowEnd) rowEnd = y; break; }
+      camera(0);
+      rowFoot = Math.round(sy(CX, CY, 0));
+      for (let i = 0; i < 24; i++) { const l = { x: 0, y: 0, v: 0, end: 0, d: 1, land: 0, p: R() * 6, c: "#" + ["ffe0bd", "ffc18a", "ffa05f", "ffd3a3"][i % 4], e: "#" + ["c9441d", "a63a12"][i % 2] }; spawnLeaf(l); l.y += R() * 90; l.x += R() * 60; fall.push(l); }
+      for (let i = 0; i < 6; i++) { const s = { x: 0, y: 0, len: 0, v: 0 }; spawnStreak(s); s.x = R() * W; streaks.push(s); }
+      sheet.onload = () => { if (f === 0) paintScene(performance.now()); };
+      sheet.src = "scan-sprites.webp";
+      if (f === 1) paintFlat(); else if (f === 0) paintScene(performance.now());
+    };
+
+    // ----- state: which way the camera is heading, and a loop that only runs while something is moving on screen
+    const status = $("[data-scan-status]"), note = $("[data-scan-note]");
+    const NOTE = { flat: note ? note.textContent : "", tree: "Tap the tree for the QR code, then point your phone camera at it to open WhatsApp." };
+    let f = 1, goal = 1, raf = 0, timer = 0, last = 0, onScreen = false, lastTick = 0;
+    const loop = (now) => {
+      raf = 0;
+      if (!onScreen && f === goal) return;
+      const dt = Math.min(64, now - (last || now));
+      last = now;
+      if (f !== goal) {
+        const dur = goal ? FOLD : GROW;
+        f = goal ? Math.min(1, f + dt / dur) : Math.max(0, f - dt / dur);
+        if (f === goal) { if (goal) paintFlat(); else paintScene(now); } else paintMove(now, dt / 1000);
+      } else if (goal === 0 && !reduceMotion && now - lastTick > 66) {      // the scene moves at about 15 frames a second
+        const step = Math.min(0.2, (now - lastTick) / 1000);
+        lastTick = now;
+        windStep(now / 1000, step);
+        paintScene(now);
+      }
+      if (f !== goal) raf = requestAnimationFrame(loop);                     // the camera moves every frame
+      else if (goal === 0 && !reduceMotion && onScreen) {
+        // at rest the scene changes about 15 times a second: wait for the next change with a timer that ends a little
+        // early, so the page is not woken up for each of the frames in between
+        const wait = 50 - (performance.now() - lastTick);
+        if (wait > 1) timer = setTimeout(() => { timer = 0; if (!raf) raf = requestAnimationFrame(loop); }, wait);
+        else raf = requestAnimationFrame(loop);
+      }
+    };
+    const kick = () => { if (timer) { clearTimeout(timer); timer = 0; } if (!raf) { last = 0; raf = requestAnimationFrame(loop); } };
+    const setGoal = (g, say) => {
+      goal = g;
+      scanBtn.setAttribute("aria-pressed", String(g === 1));
+      if (note) note.textContent = g ? NOTE.flat : NOTE.tree;
+      if (say && status) status.textContent = g ? "QR code showing. Scan it with your phone camera to open WhatsApp." : "Tree and cavemen showing.";
+      if (reduceMotion) { f = g; if (g) paintFlat(); else paintScene(performance.now()); return; }
+      kick();
+    };
+    let grown = false;
+    scanBtn.addEventListener("click", () => { build(); grown = true; setGoal(goal ? 0 : 1, true); });
+
+    // ----- size: as big as fits, in steps that keep the squares of the code a whole number of screen pixels
+    const fit = () => {
+      const box = scanBtn.parentElement, cs = getComputedStyle(box);
+      const avail = box.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+      const dpr = window.devicePixelRatio || 1;
+      const s = Math.min(avail / W, (window.innerHeight * 0.86) / H, 2);
+      const scale = Math.max(1 / dpr, Math.floor(s * dpr * TILE) / TILE / dpr);
+      scanCanvas.style.width = W * scale + "px";
+      scanCanvas.style.height = H * scale + "px";
+    };
+    scanBtn.hidden = false;
+    fit();
+    let fitW = window.innerWidth;
+    window.addEventListener("resize", () => { if (window.innerWidth !== fitW) { fitW = window.innerWidth; fit(); } });
+    const whenIdle = window.requestIdleCallback ? (fn) => window.requestIdleCallback(fn, { timeout: 3000 }) : (fn) => setTimeout(fn, 1500);
+    if (document.readyState === "complete") whenIdle(build);
+    else window.addEventListener("load", () => whenIdle(build), { once: true });
+    if ("IntersectionObserver" in window) {
+      const nearby = new IntersectionObserver((en) => { if (en.some((e) => e.isIntersecting)) { build(); nearby.disconnect(); } }, { rootMargin: "150% 0px" });
+      nearby.observe(scanCanvas);
+      new IntersectionObserver((en) => en.forEach((e) => {
+        onScreen = e.isIntersecting;
+        if (onScreen) build();
+        if (onScreen && goal === 0 && !reduceMotion) kick();
+      })).observe(scanCanvas);
+      // the first time most of it is in view, the camera comes down from above into the scene
+      if (!reduceMotion) {
+        const first = new IntersectionObserver((en) => {
+          if (!en.some((e) => e.isIntersecting) || grown) return;
+          first.disconnect();
+          setTimeout(() => { if (!grown) { build(); grown = true; setGoal(0, false); } }, 600);
+        }, { threshold: 0.45 });
+        first.observe(scanCanvas);
+      }
+    }
+  }
+
   /* ---------- intro: client names drift at different speeds ---------- */
   const names = $("[data-names]");
   if (names && !reduceMotion) {
@@ -753,6 +1312,17 @@
       };
       if (headEl) split(headEl);
       const lifeSprites = ["brachio", "trike", "chase"].filter((k) => S[k]);
+      // the ground picture (the one styles.css uses), for painting the chunks
+      const groundPic = new Image();
+      let chunkPaint = [];
+      const paintChunks = () => {
+        if (!groundPic.naturalWidth || !chunkPaint.length) return;
+        chunkPaint.forEach((fn) => fn());
+        chunkPaint = [];
+        ground.classList.add("is-split");
+      };
+      groundPic.onload = paintChunks;
+      groundPic.src = "ground.webp";
 
       let L = null;
       const layout = () => {
@@ -783,14 +1353,17 @@
           }
         }
         const walk = travel * 0.85, strike = H * VILLAGE.strike, crumble = H * VILLAGE.crumble;
-        street.style.height = Math.round(H + walk + strike + crumble) + "px";
+        // the meteorite falls during the last stretch of the walk and hits the ground the moment the street stops
+        // sliding. Only on a screen so wide that the street hardly moves is there a short pause for it to finish falling.
+        const fallFrom = Math.max(0, walk - strike), landAt = fallFrom + strike;
+        street.style.height = Math.round(H + landAt + crumble) + "px";
         const shift = start - travel;       // where the world sits once the walk is over
         const wOff = wr.left - sr.left;     // the world's own offset inside the stage
         const toStage = (r) => ({ x: r.left - wr.left + wOff + shift + r.width / 2, y: r.top - sr.top + r.height / 2 });
 
         // the ground, cut into rough chunks that can fall one by one
         ground.textContent = "";
-        ground.classList.add("is-split");
+        chunkPaint = [];
         const gw = ground.offsetWidth, gh = ground.offsetHeight;
         const gr = ground.getBoundingClientRect();
         const gx0 = gr.left - wr.left, gy0 = gr.top - sr.top;
@@ -807,11 +1380,26 @@
         const addChunk = (pts) => {
           const px = pts.map((p) => p[0]), py = pts.map((p) => p[1]);
           const minx = Math.min.apply(null, px), maxx = Math.max.apply(null, px), miny = Math.min.apply(null, py), maxy = Math.max.apply(null, py);
-          const c = el("div", { class: "chunk" });
-          // each chunk shows its own piece of the ground picture; 1px of overlap hides the seams
-          const poly = pts.map((p) => (p[0] - minx + (p[0] > (minx + maxx) / 2 ? 1 : 0)).toFixed(1) + "px " + (p[1] - miny + (p[1] > (miny + maxy) / 2 ? 1 : 0)).toFixed(1) + "px").join(",");
-          c.style.cssText = "left:" + minx.toFixed(1) + "px;top:" + miny.toFixed(1) + "px;width:" + Math.ceil(maxx - minx + 2) + "px;height:" + Math.ceil(maxy - miny + 2) +
-            "px;background-size:auto " + gh + "px;background-position:" + (-minx).toFixed(1) + "px " + (-miny).toFixed(1) + "px;clip-path:polygon(" + poly + ")";
+          // each chunk is a small canvas holding its own piece of the ground picture, cut to shape once here (1px of
+          // overlap hides the seams). A CSS clip-path would give every chunk a mask layer that the GPU redraws every frame.
+          const w = Math.ceil(maxx - minx + 2), h = Math.ceil(maxy - miny + 2), dpr = window.devicePixelRatio || 1;
+          const poly = pts.map((p) => [p[0] - minx + (p[0] > (minx + maxx) / 2 ? 1 : 0), p[1] - miny + (p[1] > (miny + maxy) / 2 ? 1 : 0)]);
+          const c = el("canvas", { class: "chunk", width: String(Math.ceil(w * dpr)), height: String(Math.ceil(h * dpr)) });
+          c.style.cssText = "left:" + minx.toFixed(1) + "px;top:" + miny.toFixed(1) + "px;width:" + w + "px;height:" + h + "px;background:none";
+          const paint = () => {
+            const g = c.getContext("2d"), k = c.width / w;
+            g.setTransform(k, 0, 0, k, 0, 0);
+            g.beginPath();
+            poly.forEach((p, i) => (i ? g.lineTo(p[0], p[1]) : g.moveTo(p[0], p[1])));
+            g.closePath();
+            g.clip();
+            // like background: repeat-x, background-size: auto gh, background-position: -minx -miny
+            const tw = groundPic.naturalWidth * gh / groundPic.naturalHeight;
+            for (let x = -(minx % tw); x < w; x += tw) g.drawImage(groundPic, x, -miny, tw, gh);
+          };
+          chunkPaint.push(paint);
+          // a reset of the graphics card hands the canvas back blank: paint its piece of ground again
+          c.addEventListener("contextrestored", () => { if (groundPic.naturalWidth) paint(); });
           ground.appendChild(c);
           chunks.push({ el: c, x: gx0 + (minx + maxx) / 2 + wOff + shift, y: gy0 + (miny + maxy) / 2 });
         };
@@ -819,15 +1407,17 @@
           addChunk([[xs[j][0], 0], [xs[j + 1][0], 0], [xs[j + 1][1], mids[j + 1]], [xs[j][1], mids[j]]]);
           addChunk([[xs[j][1], mids[j]], [xs[j + 1][1], mids[j + 1]], [xs[j + 1][2], gh], [xs[j][2], gh]]);
         }
+        // the ground picture stays whole underneath until the chunks have been painted
+        paintChunks();
 
         // where the meteorite lands, and how every piece flies off when it does
         const ix = W * 0.56, iy = gy0 + gh * 0.12;
         if (flash) { flash.style.setProperty("--ix", (ix / W * 100).toFixed(1) + "%"); flash.style.setProperty("--iy", (iy / H * 100).toFixed(1) + "%"); }
         const fallers = [];
-        const addFaller = (node, x, y, heavy, sprite) => {
+        const addFaller = (node, x, y, heavy, sprite, text) => {
           const dist = Math.min(1, Math.abs(x - ix) / W + Math.abs(y - iy) / (H * 2));
           fallers.push({
-            el: node, sprite,
+            el: node, sprite, text,
             delay: dist * 0.24 + R() * 0.04,
             vx: Math.sign(x - ix || 1) * W * (0.1 + R() * 0.32) * (1.25 - dist),
             vy: -H * (0.35 + R() * 0.85) * (1.1 - dist) * (heavy ? 0.6 : 1),
@@ -835,9 +1425,9 @@
           });
         };
         chunks.forEach((c) => addFaller(c.el, c.x, c.y, false));
-        huts.forEach((h) => { const p = toStage(h.getBoundingClientRect()); addFaller(h, p.x, p.y, true); });
+        huts.forEach((h) => { const p = toStage(h.getBoundingClientRect()); addFaller(h, p.x, p.y, true, null, true); });
         lifeSprites.forEach((k) => { const p = toStage(S[k].getBoundingClientRect()); addFaller(S[k], p.x, p.y, k === "brachio", k); });
-        words.forEach((w) => { const r = w.getBoundingClientRect(); addFaller(w, r.left - sr.left + r.width / 2, r.top - sr.top + r.height / 2, false); });
+        words.forEach((w) => { const r = w.getBoundingClientRect(); addFaller(w, r.left - sr.left + r.width / 2, r.top - sr.top + r.height / 2, false, null, true); });
         // rocks and embers thrown up by the strike
         const bits = [];
         const nb = W < 700 ? 70 : 140;
@@ -845,12 +1435,10 @@
           const a = -Math.PI * (0.08 + R() * 0.84), sp = H * (0.5 + R() * 1.7);
           bits.push({ vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, r: 1.2 + R() * R() * 8, ember: R() < 0.45, spin: R() * 8, t0: R() * 0.05 });
         }
-        if (dctx) {
-          const dpr = Math.min(window.devicePixelRatio || 1, 2);
-          debris.width = Math.round(W * dpr); debris.height = Math.round(H * dpr);
-          dctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-        }
-        L = { W, H, shop, start, travel, walk, strike, crumble, ix, iy, fallers, bits, brachio, mw: meteor ? meteor.offsetWidth : 0, mh: meteor ? meteor.offsetHeight : 0 };
+        // the debris canvas (a whole screen of pixels) only takes up memory while the street is on screen: update() sizes it
+        const ddpr = Math.min(window.devicePixelRatio || 1, 2);
+        if (dctx) { debris.width = debris.height = 1; debrisDrawn = false; }
+        L = { dw: Math.round(W * ddpr), dh: Math.round(H * ddpr), ddpr, W, H, shop, start, travel, walk, strike, crumble, fallFrom, landAt, ix, iy, fallers, bits, brachio, mw: meteor ? meteor.offsetWidth : 0, mh: meteor ? meteor.offsetHeight : 0 };
       };
 
       // how far along its walk the long-necked dinosaur is (0 to 1); its legs move only while it walks, one stride
@@ -871,13 +1459,16 @@
       const update = (y, vh) => {
         if (!L) return;
         const top = streetTop - y;
-        if (top + streetH < 0 || top > vh) return;
+        if (top + streetH < 0 || top > vh) { if (dctx && debris.width > 1) { debris.width = debris.height = 1; debrisDrawn = false; } return; }
+        if (dctx && debris.width !== L.dw) { debris.width = L.dw; debris.height = L.dh; dctx.setTransform(L.ddpr, 0, 0, L.ddpr, 0, 0); }
         const { W, H } = L;
-        const s = clamp(-top, 0, L.walk + L.strike + L.crumble);
+        const s = clamp(-top, 0, L.landAt + L.crumble);
         const pw = L.walk ? clamp(s / L.walk, 0, 1) : 1;
-        const m = clamp((s - L.walk) / L.strike, 0, 1);               // the meteorite on its way
-        const q = clamp((s - L.walk - L.strike) / L.crumble, 0, 1);   // after it lands
-        const sLife = Math.min(s, L.walk + L.strike), flee = easeIn(m);
+        const m = clamp((s - L.fallFrom) / L.strike, 0, 1);           // the meteorite on its way, landing as the walk ends
+        const q = clamp((s - L.landAt) / L.crumble, 0, 1);            // after it lands
+        // (tested on the scroll, not on q: rounding can leave q a hair under 1 at the very end)
+        const over = s >= L.landAt + L.crumble - 0.5;
+        const sLife = Math.min(s, L.landAt), flee = easeIn(m);
         put(world, "transform", "translate3d(" + (L.start - pw * L.travel).toFixed(1) + "px,0,0)");
         if (brachioAnim && L.brachio) brachioAnim.__frame = Math.floor(walked(pw) * L.brachio.steps * (+brachioAnim.dataset.n || 1));
         if (S.ptero) { // flies across the sky and escapes upwards when the meteorite comes
@@ -904,6 +1495,10 @@
         L.fallers.forEach((f) => {
           const pre = f.sprite ? life(f.sprite, sLife, pw, flee) : "";
           const t = Math.max(0, q - f.delay) * 1.7;
+          // once the crumble is over every piece is far below the screen: it is not drawn at all until the scroll comes back
+          // (the words and the homes hold the heading and the services list: they turn transparent instead, which keeps
+          // them for screen readers and find-in-page, where visibility: hidden would take them out)
+          if (f.text) put(f.el, "opacity", over ? "0" : ""); else put(f.el, "visibility", over ? "hidden" : "");
           if (t <= 0) { put(f.el, "transform", pre); return; }
           const x = f.vx * t, y = f.vy * t + 0.5 * H * 3.4 * t * t;
           put(f.el, "transform", pre + " translate3d(" + x.toFixed(1) + "px," + y.toFixed(1) + "px,0) rotate(" + (f.spin * t).toFixed(1) + "deg)");
@@ -977,8 +1572,10 @@
   }
 
   /* ---------- after the strike: a caveman and a baby triceratops land on two of the cards ---------- */
+  // (browsers with scroll-driven animations do this in styles.css, on the compositor: search for lander-drop)
   const landers = $$("[data-lander]");
-  if (landers.length && !reduceMotion) {
+  const cssLanders = !!(window.CSS && CSS.supports && CSS.supports("animation-timeline: view()"));
+  if (landers.length && !reduceMotion && !cssLanders) {
     const bounce = (x) => {
       const n = 7.5625, d = 2.75;
       if (x < 1 / d) return n * x * x;
@@ -1153,7 +1750,12 @@
     }
     // the plain film: shown when WebGL cannot draw it
     function plain() { G = null; eras.classList.remove("is-gl"); }
-    // draws the current frame of the film with the colour for point e; skipped when nothing has changed
+    // draws the current frame of the film with the colour for point e; skipped when nothing has changed.
+    // Each new film frame is copied to the GPU once, into the same texture (texSubImage2D). The texture is given the
+    // film's size first, on its own: a first copy straight from the film does not always size it (its first frame may
+    // not be decoded yet), and later copies only fit a texture of the right size. Only that first copy is checked
+    // with getError, which makes the page stop and wait for the GPU.
+    let texW = 0, texH = 0;
     const paint = (e) => {
       const k = look(e);
       eras.classList.toggle("is-far", k.far > 0.5);
@@ -1161,9 +1763,18 @@
       const key = k.c.toFixed(3) + "|" + k.now.toFixed(3) + "|" + k.far.toFixed(3) + "|" + k.r.toFixed(3);
       if (!frameNew && key === drawn) return;
       if (frameNew) {
-        if (evo.readyState < 2) return;
-        try { gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, evo); } catch (_) { plain(); return; }
-        if (gl.getError() !== gl.NO_ERROR) { plain(); return; }
+        if (evo.readyState < 2 || !evo.videoWidth) return;
+        try {
+          if (texW !== evo.videoWidth || texH !== evo.videoHeight) {
+            gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, evo.videoWidth, evo.videoHeight, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+            gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, gl.RGBA, gl.UNSIGNED_BYTE, evo);
+            if (gl.getError() !== gl.NO_ERROR) { plain(); return; }
+            texW = evo.videoWidth; texH = evo.videoHeight;
+            // and the first frame is copied again a moment later, in case it was not ready the first time
+            setTimeout(fresh, 300);
+            setTimeout(fresh, 1200);
+          } else gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, gl.RGBA, gl.UNSIGNED_BYTE, evo);
+        } catch (_) { plain(); return; }
         frameNew = false;
       }
       drawn = key;
@@ -1186,19 +1797,24 @@
       clearTimeout(seekTimer);
       seekTimer = setTimeout(() => { seeking = false; seek(); }, 400);
     };
-    const glide = () => {
+    let glideLast = 0;
+    const glide = (now) => {
       raf = 0;
-      current += (target - current) * (reduceMotion ? 1 : 0.18);
+      // the same ease at 60 and 120 frames a second (0.18 a frame at 60)
+      const dt = glideLast ? Math.min(64, now - glideLast) : 16.7;
+      glideLast = now;
+      current += (target - current) * (reduceMotion ? 1 : 1 - Math.pow(0.82, dt / 16.7));
       if (Math.abs(target - current) < 0.0005) current = target;
       seek();
       paint(current);
-      if (current !== target) raf = requestAnimationFrame(glide);
+      if (current !== target) raf = requestAnimationFrame(glide); else glideLast = 0;
     };
+    // a new frame of the film is ready: copy it now, before the next seek starts. 'seeked' and 'canplay' both arrive
+    // after every seek, so only 'seeked' copies it (listening to both copied every frame twice).
     const fresh = () => { frameNew = true; paint(current); };
     evo.addEventListener("loadedmetadata", () => { dur = evo.duration || 0; seek(); });
     evo.addEventListener("loadeddata", fresh);
     evo.addEventListener("seeked", () => { clearTimeout(seekTimer); seeking = false; fresh(); if (!raf) seek(); });
-    evo.addEventListener("canplay", () => { fresh(); seek(); });
     const label = (i) => {
       if (i === shown) return;
       const first = shown < 0;
@@ -1237,10 +1853,11 @@
   // red for a moment when the T-rex bites. It draws at half resolution, about 30 times a second, and only
   // while a section that uses it is on screen (FOG below). Reduced motion and data saver get one still frame.
   // Without WebGL the hero shows a still CSS glow instead (.no-fog in styles.css).
+  // Where the browser allows it, the fog is drawn by a worker of its own (an OffscreenCanvas): the page itself then
+  // does nothing for it, so a page sitting still at the top or the bottom is not woken up 30 to 60 times a second.
+  // Elsewhere it is drawn here, exactly as before.
   const fogCanvas = $("[data-fog]");
   if (fogCanvas) {
-    let gl = null;
-    try { gl = fogCanvas.getContext("webgl", { alpha: false, antialias: false, depth: false, stencil: false, powerPreference: "low-power" }); } catch (_) { gl = null; }
     const VS = "attribute vec2 p;void main(){gl_Position=vec4(p,0.,1.);}";
     const FS = [
       "precision mediump float;",
@@ -1264,19 +1881,27 @@
       " gl_FragColor=vec4(base+add+(h(gl_FragCoord.xy+fract(uTime))-.5)/255.,1.);",
       "}"
     ].join("\n");
-    let prog = null;
-    if (gl) {
-      const make = (type, src) => { const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s); return gl.getShaderParameter(s, gl.COMPILE_STATUS) ? s : null; };
-      const vs = make(gl.VERTEX_SHADER, VS), fs = make(gl.FRAGMENT_SHADER, FS);
-      if (vs && fs) {
-        prog = gl.createProgram();
-        gl.attachShader(prog, vs); gl.attachShader(prog, fs); gl.linkProgram(prog);
-        if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) prog = null;
+    const still = reduceMotion || saveData;
+    // how strong the fog is behind each section
+    const FOG = [["#top", 1], ["#about", 0], ["#skills", 0], ["#services", 0], ["#how", 0], ["#testimonials", 0], ["#work", 0], ["#speed", 0], ["#yours", 0.12], ["#contact", 0.95], ["#scan", 0.85], [".footer", 0.7]];
+
+    // Everything that draws the fog. It uses nothing else from this file, so the very same code runs here or in the worker.
+    // tell() reports back: { on } when the fog shows or rests, { lost } when the graphics card drops it, { fail } when it
+    // cannot start. It returns { size(w, h), set({ target, bite, mx, my, hidden }) }, or null without WebGL.
+    const fogDrawer = function (canvas, VS, FS, still, tell) {
+      let gl = null;
+      try { gl = canvas.getContext("webgl", { alpha: false, antialias: false, depth: false, stencil: false, powerPreference: "low-power" }); } catch (_) { gl = null; }
+      let prog = null;
+      if (gl) {
+        const make = (type, src) => { const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s); return gl.getShaderParameter(s, gl.COMPILE_STATUS) ? s : null; };
+        const vs = make(gl.VERTEX_SHADER, VS), fs = make(gl.FRAGMENT_SHADER, FS);
+        if (vs && fs) {
+          prog = gl.createProgram();
+          gl.attachShader(prog, vs); gl.attachShader(prog, fs); gl.linkProgram(prog);
+          if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) prog = null;
+        }
       }
-    }
-    if (!prog) {
-      root.classList.add("no-fog");
-    } else {
+      if (!prog) { tell({ fail: true }); return null; }
       gl.useProgram(prog);
       gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer());
       gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW); // one triangle that covers the screen
@@ -1285,13 +1910,12 @@
       gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
       const U = {};
       ["uRes", "uTime", "uBite", "uMouse", "uLevel"].forEach((k) => { U[k] = gl.getUniformLocation(prog, k); });
-      const still = reduceMotion || saveData;
-      // how strong the fog is behind each section
-      const FOG = [["#top", 1], ["#about", 0], ["#skills", 0], ["#services", 0], ["#how", 0], ["#testimonials", 0], ["#work", 0], ["#speed", 0], ["#yours", 0.12], ["#contact", 0.95], [".footer", 0.7]];
-      let level = 1, target = 1, bite = 0, mx = 0.5, my = 0.5, tmx = 0.5, tmy = 0.5, raf = 0, last = 0, lost = false;
+      const nextFrame = typeof requestAnimationFrame === "function" ? requestAnimationFrame : (fn) => setTimeout(() => fn(performance.now()), 16);
+      let level = 1, target = 1, bite = 0, biteTarget = 0, mx = 0.5, my = 0.5, tmx = 0.5, tmy = 0.5;
+      let raf = 0, timer = 0, last = 0, lost = false, hidden = false, on = null;
       const start = performance.now();
       const draw = (now) => {
-        gl.uniform2f(U.uRes, fogCanvas.width, fogCanvas.height);
+        gl.uniform2f(U.uRes, canvas.width, canvas.height);
         gl.uniform1f(U.uTime, still ? 14 : (now - start) / 1000);
         gl.uniform1f(U.uBite, bite);
         gl.uniform2f(U.uMouse, mx, my);
@@ -1300,48 +1924,116 @@
       };
       const frame = (now) => {
         raf = 0;
-        if (document.hidden || lost) return;
-        if (!still && now - last < 32) { kick(); return; } // about 30 frames a second is plenty for fog
+        if (hidden || lost) return;
+        if (!still && now - last < 32) { raf = nextFrame(frame); return; } // about 30 frames a second is plenty for fog
         last = now;
         const k = still ? 1 : 0.07;
         level += (target - level) * k;
-        bite += (fx.bite - bite) * (still ? 1 : 0.35);
+        bite += (biteTarget - bite) * (still ? 1 : 0.35);
         mx += (tmx - mx) * 0.05; my += (tmy - my) * 0.05;
         const idle = target < 0.01 && level < 0.01;
-        fogCanvas.classList.toggle("is-on", !idle);
+        if (on !== !idle) { on = !idle; tell({ on }); }
         if (!idle) draw(now);
         if (!still && !idle) kick();
       };
-      const kick = () => { if (!raf) raf = requestAnimationFrame(frame); };
-      const size = () => {
-        const scale = window.innerWidth < 700 ? 0.42 : 0.5;
-        fogCanvas.width = Math.max(2, Math.round(window.innerWidth * scale));
-        fogCanvas.height = Math.max(2, Math.round(window.innerHeight * scale));
-        gl.viewport(0, 0, fogCanvas.width, fogCanvas.height);
-        last = 0;
-        kick();
+      // between two frames it waits with a timer instead of asking for every frame, so nothing is woken up 60 (or 120)
+      // times a second only to find that it is not time yet; the timer ends a little before the frame it is waiting for
+      const kick = () => {
+        if (raf || timer) return;
+        const wait = 16 - (performance.now() - last);
+        if (wait > 1) timer = setTimeout(() => { timer = 0; if (!raf) raf = nextFrame(frame); }, wait);
+        else raf = nextFrame(frame);
       };
+      canvas.addEventListener("webglcontextlost", (e) => { e.preventDefault(); lost = true; tell({ lost: true }); });
+      return {
+        size(w, h) { canvas.width = w; canvas.height = h; gl.viewport(0, 0, w, h); last = 0; kick(); },
+        set(m) {
+          if (m.target != null) target = m.target;
+          if (m.bite != null) biteTarget = m.bite;
+          if (m.mx != null) { tmx = m.mx; tmy = m.my; }
+          if (m.hidden != null) hidden = m.hidden;
+          kick();
+        }
+      };
+    };
+    // the worker: it checks that it can draw WebGL into an OffscreenCanvas first, then takes over the real canvas
+    const fogWorker = function (fogDrawer) {
+      let fog = null;
+      self.onmessage = (e) => {
+        const m = e.data;
+        if (m.probe) {
+          let ok = false;
+          try { ok = !!fogDrawer(new OffscreenCanvas(2, 2), m.VS, m.FS, true, () => {}); } catch (_) { ok = false; }
+          self.postMessage({ probe: ok });
+        } else if (m.canvas) {
+          fog = fogDrawer(m.canvas, m.VS, m.FS, m.still, (r) => self.postMessage(r));
+          if (fog) { fog.set(m.state); fog.size(m.w, m.h); }
+        } else if (fog) {
+          if (m.w) fog.size(m.w, m.h); else fog.set(m);
+        }
+      };
+    };
+
+    const fogSize = () => {
+      const scale = window.innerWidth < 700 ? 0.42 : 0.5;
+      return [Math.max(2, Math.round(window.innerWidth * scale)), Math.max(2, Math.round(window.innerHeight * scale))];
+    };
+    const told = (m) => {
+      if (m.on != null) fogCanvas.classList.toggle("is-on", m.on);
+      if (m.lost || m.fail) { fogCanvas.classList.remove("is-on"); root.classList.add("no-fog"); }
+    };
+    // the hero sets fx.bite as it scrolls: pass it on only when it changes
+    let fog = null, biteNow = fx.bite;
+    Object.defineProperty(fx, "bite", { get: () => biteNow, set: (v) => { if (v !== biteNow) { biteNow = v; if (fog) fog.set({ bite: v }); } } });
+    const begin = (drawer) => {
+      fog = drawer;
       if ("IntersectionObserver" in window) {
         const zones = new IntersectionObserver((entries) => {
-          entries.forEach((en) => { if (en.isIntersecting) { target = parseFloat(en.target.dataset.fogLevel); kick(); } });
+          entries.forEach((en) => { if (en.isIntersecting) fog.set({ target: parseFloat(en.target.dataset.fogLevel) }); });
         }, { rootMargin: "-48% 0px -48% 0px" });
         FOG.forEach(([sel, v]) => { const sec = $(sel); if (sec) { sec.dataset.fogLevel = v; zones.observe(sec); } });
       }
-      if (!still) {
-        window.addEventListener("scroll", kick, { passive: true });
-        if (finePointer) window.addEventListener("pointermove", (e) => { tmx = e.clientX / window.innerWidth; tmy = 1 - e.clientY / window.innerHeight; kick(); }, { passive: true });
-      }
-      fogCanvas.addEventListener("webglcontextlost", (e) => { e.preventDefault(); lost = true; fogCanvas.classList.remove("is-on"); root.classList.add("no-fog"); });
-      document.addEventListener("visibilitychange", kick);
+      if (!still && finePointer) window.addEventListener("pointermove", (e) => { fog.set({ mx: e.clientX / window.innerWidth, my: 1 - e.clientY / window.innerHeight }); }, { passive: true });
+      document.addEventListener("visibilitychange", () => fog.set({ hidden: document.hidden }));
       // (phones change height while the address bar slides in and out: the fog simply stretches for that)
       let fogW = window.innerWidth, fogH = window.innerHeight;
       window.addEventListener("resize", () => {
         if (!finePointer && window.innerWidth === fogW && Math.abs(window.innerHeight - fogH) < 160) return;
         fogW = window.innerWidth; fogH = window.innerHeight;
-        size();
+        fog.size(...fogSize());
       });
-      size();
-    }
+      if (biteNow) fog.set({ bite: biteNow });
+      fog.size(...fogSize());
+    };
+    const onPage = () => { const d = fogDrawer(fogCanvas, VS, FS, still, told); if (d) { d.set({ hidden: document.hidden }); begin(d); } };
+    if (fogCanvas.transferControlToOffscreen && window.Worker && window.OffscreenCanvas && window.Blob && window.URL && URL.createObjectURL && location.protocol !== "file:") {
+      let worker = null, wait = 0, settled = false, url = "";
+      const here = () => {
+        if (settled) return;
+        settled = true; clearTimeout(wait);
+        try { worker.terminate(); } catch (_) {}
+        onPage();
+      };
+      try {
+        url = URL.createObjectURL(new Blob(["(" + fogWorker + ")(" + fogDrawer + ");"], { type: "text/javascript" }));
+        worker = new Worker(url);
+        worker.onerror = here;
+        worker.onmessage = (e) => {
+          if (settled || e.data.probe == null) return;
+          URL.revokeObjectURL(url);
+          if (!e.data.probe) { here(); return; }
+          settled = true; clearTimeout(wait);
+          const off = fogCanvas.transferControlToOffscreen();
+          const [w, h] = fogSize();
+          worker.postMessage({ canvas: off, VS, FS, still, w, h, state: { hidden: document.hidden, bite: biteNow } }, [off]);
+          worker.onmessage = (ev) => told(ev.data);
+          worker.onerror = () => told({ fail: true });
+          begin({ set: (m) => worker.postMessage(m), size: (w2, h2) => worker.postMessage({ w: w2, h: h2 }) });
+        };
+        worker.postMessage({ probe: true, VS, FS });
+        wait = setTimeout(here, 2500); // no answer: draw it here
+      } catch (_) { here(); }
+    } else onPage();
   }
 
   /* ---------- background field: an abstract clip, redrawn as tangerine dots ---------- */
@@ -1353,7 +2045,7 @@
   // how strong the field is behind each section: full where there is little text, faint behind reading.
   // It is switched off everywhere for now (every level is 0), so the page skips it completely: nothing is
   // downloaded or drawn. Give a section a level above 0 to bring it back.
-  const LEVELS = [["#top", 0], ["#about", 0], ["#skills", 0], ["#services", 0], ["#how", 0], ["#testimonials", 0], ["#work", 0], ["#speed", 0], ["#yours", 0], ["#contact", 0], [".footer", 0]];
+  const LEVELS = [["#top", 0], ["#about", 0], ["#skills", 0], ["#services", 0], ["#how", 0], ["#testimonials", 0], ["#work", 0], ["#speed", 0], ["#yours", 0], ["#contact", 0], ["#scan", 0], [".footer", 0]];
   const fieldCanvas = $("[data-field]");
   if (fieldCanvas && !LEVELS.some((lv) => lv[1] > 0)) fieldCanvas.hidden = true;
   else if (fieldCanvas && fieldCanvas.getContext) {
@@ -1570,18 +2262,26 @@
     // CAVEMAN: he stands at the right end of one row, starting with Baby Boss Lash Studio (the top row).
     // Click or tap that row (or him) and a wooden club swings down onto his head: his face goes cross-eyed,
     // stars and birds circle, he wobbles, then he hops off to another row picked at random. Decorative only.
-    const CAVEMAN = { start: "Baby Boss Lash Studio" };
+    const CAVEMAN = { start: "Baby Boss Lash Studio", says: "My websites are fast, but I'm faster. Try and hit me." };
     const img = (src, cls) => el("img", { src, class: cls, alt: "", width: "164", height: "300", loading: "lazy", decoding: "async" });
     const caveBody = el("div", { class: "cave__body" }, [img("caveman-stand.webp", "cave__man"), img("caveman-bonk.webp", "cave__man cave__man--bonk")]);
     const club = el("img", { src: "caveman-club.webp", class: "cave__club", alt: "", width: "220", height: "240", loading: "lazy", decoding: "async" });
-    const cave = el("div", { class: "cave", "aria-hidden": "true" }, [caveBody, club]);
-    let caveSite = CAVEMAN.start, caveBusy = false, caveSpots = {}, caveX = 0, caveH = 0; // caveSpots: where each row's bars end at the bottom
+    // his speech bubble (CAVEMAN.says). It pops up once the bars have grown, goes while he is being bonked and comes
+    // back when he has landed on his new row, and steps aside whenever a bar's numbers are showing (styles.css)
+    const say = el("p", { class: "cave__say", text: CAVEMAN.says });
+    const cave = el("div", { class: "cave", "aria-hidden": "true" }, [caveBody, club, say]);
+    let caveSite = CAVEMAN.start, caveBusy = false, caveSpots = {}, caveX = 0, caveH = 0, sayTop = -1e4; // caveSpots: where each row's bars end at the bottom
     const cavePos = (name) => caveSpots[name] || caveSpots[CAVEMAN.start] || 0;
     const caveAt = (y) => "translate3d(" + caveX.toFixed(1) + "px," + (y - caveH).toFixed(1) + "px,0)";
     const markCaveRow = () => rowsEls.forEach((g) => g.classList.toggle("has-cave", g.dataset.site === caveSite));
+    const talk = (on) => cave.classList.toggle("is-talking", on);
+    // the bubble sits above his head; on the top rows there is no room above him (the buttons are there), so it sits
+    // beside his head instead
+    const placeSay = (y) => cave.classList.toggle("says-beside", y - caveH - say.offsetHeight < sayTop);
     const bonk = () => {
       if (caveBusy) return;
       caveBusy = true;
+      talk(false);
       hideTip();
       const others = SPEED.sites.map((s) => s.name).filter((n) => n !== caveSite);
       const next = others[Math.floor(Math.random() * others.length)];
@@ -1589,9 +2289,10 @@
       const land = () => {
         caveSite = next;
         cave.style.transform = caveAt(y1);
+        placeSay(y1);
         markCaveRow();
       };
-      const done = () => { cave.classList.remove("is-bonked"); caveBusy = false; };
+      const done = () => { cave.classList.remove("is-bonked"); caveBusy = false; talk(true); };
       if (reduceMotion || !cave.animate) {
         // no swinging or hopping: the dazed face for a moment, then he is simply at his new row
         cave.classList.add("is-bonked");
@@ -1725,7 +2426,9 @@
       // he stands on the bar line at the right edge of the chart, his feet level with the bottom of the bars
       caveX = width - cave.offsetWidth - 2;
       caveH = cave.offsetHeight;
-      if (!caveBusy) cave.style.transform = caveAt(cavePos(caveSite));
+      // the lowest the bubble may reach up to: just under the buttons above the chart
+      sayTop = toggleWrap && !toggleWrap.hidden ? toggleWrap.getBoundingClientRect().bottom - plot.getBoundingClientRect().top + 6 : -1e4;
+      if (!caveBusy) { cave.style.transform = caveAt(cavePos(caveSite)); placeSay(cavePos(caveSite)); }
       markCaveRow();
       big.textContent = m.fmt(med);
       caption.textContent = m.caption + ", across the ten websites above";
@@ -1742,16 +2445,17 @@
     chart.classList.add("is-live");
     draw(false);
 
-    // bars grow in the first time the chart comes into view
+    // bars grow in the first time the chart comes into view, and then he has his say
     if ("IntersectionObserver" in window && !reduceMotion) {
       const io = new IntersectionObserver((entries) => {
         if (!entries.some((en) => en.isIntersecting)) return;
         io.disconnect();
         shown = true;
         draw(true);
+        setTimeout(() => { if (!caveBusy) talk(true); }, 1100);
       }, { threshold: 0.35 });
       io.observe(chart);
-    }
+    } else talk(true);
     // redraw whenever the chart's own width changes (window resize, or the first time it gets a size)
     let resizeTimer = 0, lastW = plot.clientWidth;
     const redraw = () => {
@@ -1762,6 +2466,15 @@
     };
     if ("ResizeObserver" in window) new ResizeObserver(redraw).observe(plot);
     else window.addEventListener("resize", redraw);
+  }
+
+  /* ---------- decorative CSS loops rest while they are off screen ---------- */
+  // An infinite CSS animation keeps the browser restyling (and, for some, laying out and repainting) every frame,
+  // wherever on the page you are. These pause while their part of the page is out of view (.is-paused in styles.css).
+  if ("IntersectionObserver" in window) {
+    const rest = new IntersectionObserver((entries) => entries.forEach((en) => en.target.classList.toggle("is-paused", !en.isIntersecting)), { rootMargin: "100px 0px" });
+    // (for the contact T-rex, the window it rises through: it hangs well above the button box below it)
+    $$(".hero__cue, [data-mock], .cta__peek").forEach((n) => rest.observe(n));
   }
 
   /* ---------- footer year ---------- */
@@ -1943,7 +2656,8 @@
     const page = $("[data-mock-page]", mock), screen = $(".mock__screen", mock);
     // how far the demo page scrolls inside the phone
     const setTravel = () => { if (page && screen) mock.style.setProperty("--travel", Math.max(0, page.scrollHeight - screen.clientHeight + 12) + "px"); };
-    window.addEventListener("resize", setTravel);
+    let travelW = window.innerWidth;
+    window.addEventListener("resize", () => { if (window.innerWidth !== travelW) { travelW = window.innerWidth; setTravel(); } });
     const paint = () => {
       const s = state();
       mock.dataset.type = s.type;

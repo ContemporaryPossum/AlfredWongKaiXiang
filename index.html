@@ -531,6 +531,25 @@
         </div>
       </div>
     </section>
+
+    <!--
+      SCAN ME: a QR code that opens WhatsApp to +60 17-353 4960, drawn in 8-bit by main.js (search for SCAN). The tree is the
+      QR code: every leaf stands in a column above a dark square of the code. From the side it is a tree in the wind, with a
+      caveman napping by it and another chased round it by a T-rex. Tapping the tree lifts the camera until it looks straight
+      down and the tree lines up into the flat QR code to scan. Tap again to come back down.
+      Without JavaScript the plain QR picture (qr-whatsapp.svg) shows instead. If the number changes, the QR code needs
+      remaking (see the README).
+    -->
+    <section class="scan" id="scan" aria-labelledby="scan-title">
+      <h2 class="small-caps scan__title reveal" id="scan-title">Or scan it</h2>
+      <button type="button" class="scan__toggle" data-scan-toggle aria-pressed="true" aria-label="Show the flat QR code" hidden>
+        <canvas class="scan__canvas" data-scan-canvas width="320" height="348"></canvas>
+      </button>
+      <img class="scan__img" src="qr-whatsapp.svg" width="296" height="296" loading="lazy" decoding="async" alt="QR code. Scan it with your phone camera to open WhatsApp and message Alfred.">
+      <p class="sr" data-scan-status aria-live="polite"></p>
+      <p class="scan__note" data-scan-note>Point your phone camera at the code and it opens WhatsApp to me.</p>
+      <a class="scan__link" href="https://wa.me/60173534960" target="_blank" rel="noopener">Already on your phone? Open WhatsApp</a>
+    </section>
   </main>
 
   <footer class="footer">
