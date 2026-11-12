@@ -183,17 +183,20 @@ main, .footer { position: relative; z-index: 1; }
 .evo, .evo__gl { position: absolute; inset: 0; width: 100%; height: 100%; max-width: none; }
 /* main.js draws the film and its colour on the canvas (Kuala Lumpur in colour, the interstellar city in tangerine:
    search for COLOUR), fading it out towards the top. The video underneath only supplies the frames. */
+/* it takes over from the plain film once it has really drawn a frame, fading in over it */
 .evo__gl { display: none; }
-.eras.is-gl .evo__gl { display: block; }
-.eras.is-gl .evo { opacity: 0; }
-/* without WebGL: the plain ink film, faded towards the top, turning tangerine for the interstellar city */
-.eras:not(.is-gl) .evo {
-  opacity: .55;
+.eras.is-gl .evo__gl { display: block; animation: evo-in .6s var(--ease) both; }
+@keyframes evo-in { from { opacity: 0; } }
+.eras.is-gl .evo { opacity: 0; transition: opacity .6s var(--ease); }
+/* the plain ink film (without WebGL, and until WebGL has drawn a frame): faded towards the top, about as bright as the
+   WebGL one, turning tangerine for the interstellar city */
+.evo {
   -webkit-mask-image: linear-gradient(to top, #000 42%, transparent 82%);
   mask-image: linear-gradient(to top, #000 42%, transparent 82%);
-  transition: filter 1s var(--ease), opacity 1s var(--ease);
 }
-.eras.is-far:not(.is-gl) .evo { opacity: .75; filter: sepia(1) saturate(4.5) hue-rotate(-34deg) brightness(.92); }
+.eras:not(.is-gl) .evo { opacity: .5; transition: filter 1s var(--ease), opacity 1s var(--ease); }
+.eras.is-far .evo { filter: sepia(1) saturate(4.5) hue-rotate(-34deg) brightness(.92); }
+.eras.is-far:not(.is-gl) .evo { opacity: .75; }
 .eras__tag {
   position: absolute; left: var(--gutter); bottom: 1.2rem;
   display: flex; align-items: baseline; gap: .7rem;
@@ -338,7 +341,9 @@ main, .footer { position: relative; z-index: 1; }
   visibility: hidden;
   will-change: transform;
 }
-.rex.is-on { visibility: visible; }
+.rex.is-on, .rex.is-parked { visibility: visible; }
+/* while the hero changes size the waiting T-rex hides, until main.js has placed it for the new size */
+.rex.is-parked.is-sizing { visibility: hidden; }
 .rex:not(.is-on) .rex__bob { animation-play-state: paused; }
 .rex__bob {
   position: absolute; inset: 0;
@@ -1004,16 +1009,6 @@ main, .footer { position: relative; z-index: 1; }
 .js .scan__img { display: none; }
 .scan__img { width: min(296px, 100%); }
 .scan__note { max-width: 34ch; color: var(--fg-2); font-size: 1rem; line-height: 1.5; }
-/* an 8-bit button: square corners cut in steps */
-.scan__link {
-  padding: .8rem 1.3rem; background: var(--accent); color: var(--accent-ink);
-  font-size: .95rem; font-weight: 600; text-decoration: none;
-  clip-path: polygon(0 6px, 6px 6px, 6px 0, calc(100% - 6px) 0, calc(100% - 6px) 6px, 100% 6px, 100% calc(100% - 6px), calc(100% - 6px) calc(100% - 6px), calc(100% - 6px) 100%, 6px 100%, 6px calc(100% - 6px), 0 calc(100% - 6px));
-  transition: background-color .2s;
-}
-.scan__link:hover { background: #ff7f57; }
-/* clip-path would cut off the usual focus ring, so the focus state inverts the button instead */
-.scan__link:focus-visible { outline: none; background: var(--fg); }
 
 .footer { padding: clamp(4.5rem, 9vw, 6.5rem) var(--gutter) 2rem; border-top: 1px solid var(--rule); }
 .footer__inner { display: grid; gap: 2.5rem; width: min(var(--wide), 100%); margin-inline: auto; }

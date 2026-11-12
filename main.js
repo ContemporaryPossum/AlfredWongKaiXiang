@@ -290,7 +290,11 @@
       if (im.dataset.srcset) im.srcset = im.dataset.srcset;
       im.src = im.dataset.src;
     });
-    ["rex-half-3-m.webp", "rex-bite-m.webp"].forEach((src) => { const im = new Image(); im.src = src; });
+    const masks = ["rex-half-3-m.webp", "rex-bite-m.webp"].map((src) => { const im = new Image(); im.src = src; return im; });
+    // and are unpacked (decoded) ahead of time, while the page sits still at the top. Otherwise a phone unpacks each
+    // drawing the moment it first shows, and the T-rex stalls for a moment just as the visitor starts to scroll.
+    const warm = () => Object.keys(frames).map((k) => frames[k]).concat(masks).forEach((im) => { if (im.decode) im.decode().catch(() => {}); });
+    if (document.readyState === "complete") warm(); else window.addEventListener("load", warm, { once: true });
 
     // the word, as letters, plus a copy of it that becomes the bitten-off piece; screen readers read the word once
     const word = prey.textContent.trim();
@@ -435,7 +439,14 @@
         settle = Math.max(settle, s.te + 0.014);
         s.drips.forEach((d) => { settle = Math.max(settle, s.te + 0.012 + d.max / (unit * d.speed * 3)); });
       });
-      L = { W, H, bx, by, rw, rh, ww, wh, unit, lets, keep, drops, shades, splats, bitten: null, settle };
+      L = { W, H, bx, by, rw, rh, ww, wh, unit, lets, keep, drops, shades, splats, bitten: null, settle, park: 0 };
+      // how far from its first pose the T-rex waits before it rises (see pose): with the top corner of the tilted
+      // drawing 2px below the bottom of the screen, out of sight but close enough for the browser to prepare it
+      {
+        const r = rexAt(ACT.rise), th = r.rot * Math.PI / 180, ox = r.a[0] * rw, oy = r.a[1] * rh;
+        const top = Math.min.apply(null, [[0, 0], [rw, 0], [0, rh], [rw, rh]].map(([cx, cy]) => (cx - ox) * Math.sin(th) + (cy - oy) * Math.cos(th)));
+        L.park = H + 2 - (r.y + top);
+      }
       bloodAt = -1;
       if (bctx) {
         const dpr = Math.min(window.devicePixelRatio || 1, 2);
@@ -443,7 +454,15 @@
         bloodCanvas.height = Math.round(H * dpr);
         bctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       }
+      rex.classList.remove("is-sizing"); // placed for this size (the next scroll scene poses it)
     };
+    // when the hero changes size, the T-rex waiting below it hides until layout has placed it for the new size: its
+    // place was worked out for the old size, and in a taller or wider hero it would show (is-sizing in styles.css)
+    window.addEventListener("resize", () => {
+      if (!L) return;
+      const s = stage.getBoundingClientRect();
+      if (Math.abs(s.width - L.W) > 0.5 || Math.abs(s.height - L.H) > 0.5) rex.classList.add("is-sizing");
+    }, { passive: true });
 
     // ----- where the bite point is, how the head is tilted and which drawing shows, at progress p
     // (a positive angle lifts the snout, a negative one drops it)
@@ -591,12 +610,16 @@
       if (!L) return;
       hero.classList.toggle("is-moving", p > 0.02);
       const on = p > ACT.rise && p < ACT.gone;
+      // before it rises, the T-rex waits just below the screen: out of sight, but drawn, so the browser has it ready
+      // before the first scroll instead of preparing it in the middle of one (which made it stall on phones)
+      const parked = !still && p <= ACT.rise;
       rex.classList.toggle("is-on", on);
+      rex.classList.toggle("is-parked", parked);
       const r = rexAt(clamp(p, ACT.rise, ACT.gone));
-      if (on) {
+      if (on || parked) {
         showFrame(r.f);
         put(rex, "transformOrigin", (r.a[0] * 100).toFixed(2) + "% " + (r.a[1] * 100).toFixed(2) + "%");
-        put(rex, "transform", "translate3d(" + (r.x - r.a[0] * L.rw).toFixed(1) + "px," + (r.y - r.a[1] * L.rh).toFixed(1) + "px,0) rotate(" + r.rot.toFixed(2) + "deg)");
+        put(rex, "transform", "translate3d(" + (r.x - r.a[0] * L.rw).toFixed(1) + "px," + (r.y - r.a[1] * L.rh + (parked ? L.park : 0)).toFixed(1) + "px,0) rotate(" + r.rot.toFixed(2) + "deg)");
       }
       poseWord(p, r);
       // a short shudder through the whole scene as the jaws close
@@ -1638,12 +1661,50 @@
     const when = $("[data-era-when]", eras), name = $("[data-era-name]", eras), tag = $(".eras__tag", eras);
     const fill = $("[data-era-fill]", eras);
     let loaded = false, shown = -1, swapTimer = 0, dur = 0, target = 0, current = 0, seeking = false, raf = 0;
+    // the film's first frame as a still picture (evolution-poster.webp). It is small, so it is fetched early, once the
+    // page has loaded and gone quiet: on a slow connection it is then there before the visitor reaches the film.
+    let pic = null;
+    const still = () => {
+      if (pic || !evo.dataset.poster) return pic;
+      pic = new Image();
+      try { pic.fetchPriority = "high"; } catch (_) {}
+      pic.src = evo.dataset.poster;
+      return pic;
+    };
+    if (!saveData) {
+      const early = () => (window.requestIdleCallback ? requestIdleCallback(still, { timeout: 4000 }) : setTimeout(still, 2000));
+      if (document.readyState === "complete") early(); else window.addEventListener("load", early, { once: true });
+    }
     const load = () => {
       if (loaded) return;
       loaded = true;
       evo.preload = "auto";
-      loadFilm(evo, evo.dataset.src);
+      const film = () => loadFilm(evo, evo.dataset.src).then(prime);
+      // the still picture shows until the film itself has loaded; the film is fetched once the picture is there (or
+      // after 2.5 s at most), so on a slow connection the small picture never queues behind the large film
+      const p = still();
+      if (!p) { film(); return; }
+      let started = false;
+      const go = () => { if (started) return; started = true; clearTimeout(wait); film(); };
+      const wait = setTimeout(go, 2500);
+      const show = () => { evo.poster = evo.dataset.poster; go(); };
+      if (p.complete) { if (p.naturalWidth) show(); else go(); }
+      else { p.addEventListener("load", show, { once: true }); p.addEventListener("error", go, { once: true }); }
     };
+    // iPhones (and phones saving battery) load nothing of a film that has never played, and then cannot show the
+    // frame the scroll asks for. So the film is started and stopped straight away, muted, which makes them load it.
+    // If the browser does not allow even that, it is tried again on the visitor's next tap or key press.
+    let primed = false;
+    const retry = () => { ["pointerup", "keydown"].forEach((t) => window.removeEventListener(t, retry, true)); prime(); };
+    function prime() {
+      if (primed) return;
+      let pr = null;
+      try { pr = evo.play(); } catch (_) { pr = null; }
+      if (pr && pr.then) {
+        pr.then(() => { primed = true; evo.pause(); seeking = false; seek(); },
+          () => { ["pointerup", "keydown"].forEach((t) => window.addEventListener(t, retry, { capture: true, passive: true })); });
+      } else { primed = true; evo.pause(); }
+    }
     if ("IntersectionObserver" in window) {
       const io = new IntersectionObserver((en) => { if (en.some((e) => e.isIntersecting)) { load(); io.disconnect(); } }, { rootMargin: "150% 0px" });
       io.observe(erasFrom);
@@ -1744,24 +1805,46 @@
         G = {};
         ["uC", "uNow", "uFar", "uR"].forEach((k) => { G[k] = gl.getUniformLocation(prog, k); });
         gl.viewport(0, 0, glCanvas.width, glCanvas.height);
-        eras.classList.add("is-gl");
+        // (the canvas only takes over from the plain film once it has really drawn a frame: see check below)
         glCanvas.addEventListener("webglcontextlost", (ev) => { ev.preventDefault(); plain(); });
       } else gl = null;
     }
     // the plain film: shown when WebGL cannot draw it
     function plain() { G = null; eras.classList.remove("is-gl"); }
+    // Some phones take the film's frames into WebGL without any error and still hand it nothing, which left an empty
+    // space where the film should be. So the plain film shows until WebGL has really drawn a frame: after each of the
+    // first copies, one row of what WebGL drew is read back and compared with the same row of the film itself. If the
+    // film shows something there and WebGL three times draws nothing, the plain film stays for good.
+    let glOk = false, glBad = 0, probe = null;
+    const check = () => {
+      try {
+        if (!probe) { probe = document.createElement("canvas"); probe.width = 64; probe.height = 28; }
+        const pc = probe.getContext("2d", { willReadFrequently: true });
+        pc.drawImage(evo, 0, 0, 64, 28);
+        const v = pc.getImageData(0, 20, 64, 1).data;
+        let vMax = 0;
+        for (let i = 0; i < v.length; i += 4) vMax = Math.max(vMax, v[i], v[i + 1], v[i + 2]);
+        const g = new Uint8Array(glCanvas.width * 4);
+        gl.readPixels(0, Math.round(glCanvas.height * (1 - 20.5 / 28)), glCanvas.width, 1, gl.RGBA, gl.UNSIGNED_BYTE, g);
+        let gMax = 0;
+        for (let i = 0; i < g.length; i += 4) gMax = Math.max(gMax, g[i], g[i + 1], g[i + 2]);
+        if (gMax > 6) { glOk = true; eras.classList.add("is-gl"); }
+        else if (vMax > 40 && ++glBad >= 3) plain();
+      } catch (_) { /* cannot tell yet: tried again after the next copy */ }
+    };
     // draws the current frame of the film with the colour for point e; skipped when nothing has changed.
     // Each new film frame is copied to the GPU once, into the same texture (texSubImage2D). The texture is given the
     // film's size first, on its own: a first copy straight from the film does not always size it (its first frame may
     // not be decoded yet), and later copies only fit a texture of the right size. Only that first copy is checked
     // with getError, which makes the page stop and wait for the GPU.
-    let texW = 0, texH = 0;
+    let texW = 0, texH = 0, upAt = -1;
     const paint = (e) => {
       const k = look(e);
       eras.classList.toggle("is-far", k.far > 0.5);
       if (!G) return;
       const key = k.c.toFixed(3) + "|" + k.now.toFixed(3) + "|" + k.far.toFixed(3) + "|" + k.r.toFixed(3);
       if (!frameNew && key === drawn) return;
+      const copied = frameNew;
       if (frameNew) {
         if (evo.readyState < 2 || !evo.videoWidth) return;
         try {
@@ -1776,8 +1859,18 @@
           } else gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, gl.RGBA, gl.UNSIGNED_BYTE, evo);
         } catch (_) { plain(); return; }
         frameNew = false;
+        upAt = evo.currentTime;
       }
       drawn = key;
+      // until WebGL has shown that it really draws the film, each new copy is first drawn bare, without the colour
+      // (the colour alone lights up the checked row even when no film arrived), and that bare drawing is checked;
+      // the coloured drawing below then replaces it before anything shows
+      if (copied && !glOk) {
+        gl.uniform1f(G.uC, 0); gl.uniform1f(G.uNow, 0); gl.uniform1f(G.uFar, 0); gl.uniform1f(G.uR, 0);
+        gl.drawArrays(gl.TRIANGLES, 0, 3);
+        check();
+        if (!G) return;
+      }
       gl.uniform1f(G.uC, k.c);
       gl.uniform1f(G.uNow, k.now);
       gl.uniform1f(G.uFar, k.far);
@@ -1810,11 +1903,13 @@
       if (current !== target) raf = requestAnimationFrame(glide); else glideLast = 0;
     };
     // a new frame of the film is ready: copy it now, before the next seek starts. 'seeked' and 'canplay' both arrive
-    // after every seek, so only 'seeked' copies it (listening to both copied every frame twice).
+    // after every seek; 'seeked' copies the frame, and 'canplay' only when that frame has not been copied yet (Safari
+    // can report a seek done before the frame is there to copy).
     const fresh = () => { frameNew = true; paint(current); };
     evo.addEventListener("loadedmetadata", () => { dur = evo.duration || 0; seek(); });
     evo.addEventListener("loadeddata", fresh);
     evo.addEventListener("seeked", () => { clearTimeout(seekTimer); seeking = false; fresh(); if (!raf) seek(); });
+    evo.addEventListener("canplay", () => { if (evo.currentTime !== upAt) fresh(); });
     const label = (i) => {
       if (i === shown) return;
       const first = shown < 0;
